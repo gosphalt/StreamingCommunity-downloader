@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import configured_domain
-from app.core.page import search as core_search
+from app.core.page import BROWSE_LISTS, browse as core_browse, browse_options as core_browse_options, search as core_search
 from app.core.film import get_film_languages
 from app.core.tv import get_tv_languages
 from app.core import animeunity
@@ -74,6 +74,37 @@ async def search(
         logger.exception("Search error")
         raise HTTPException(status_code=502, detail=str(e))
     return results
+
+
+@router.get("/browse")
+async def browse(
+    list: str = Query(default="archive", pattern="^(" + "|".join(BROWSE_LISTS) + ")$"),
+    page: int = Query(default=1, ge=1, le=50),
+    media_type: str | None = Query(default=None, pattern="^(movie|tv)$"),
+    genre: int | None = Query(default=None, ge=1),
+    country: int | None = Query(default=None, ge=1),
+    year: int | None = Query(default=None, ge=1900, le=2100),
+    sort: str | None = Query(default=None, pattern="^(views|score|release_date)$"),
+):
+    """StreamingCommunity's archive and ranked lists, filtered by the source."""
+    domain = _domain()
+    try:
+        return await asyncio.to_thread(
+            core_browse, domain, list_name=list, page=page, media_type=media_type,
+            genre=genre, year=year, country=country, sort=sort)
+    except Exception as e:
+        logger.exception("Browse error")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/browse/options")
+async def browse_options():
+    domain = _domain()
+    try:
+        return await asyncio.to_thread(core_browse_options, domain)
+    except Exception as e:
+        logger.exception("Browse options error")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/languages/{title_id}")

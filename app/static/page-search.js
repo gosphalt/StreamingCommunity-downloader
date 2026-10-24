@@ -42,6 +42,7 @@ function setSource(src) {
   _searchExhausted = false;
   _kindFilter = '';
   _dubOnly = false;
+  _browse = null;
   renderSearchFilters();
   _setMoreVisible(false);
   // Clearing the grid and leaving the query typed is what made the selector
@@ -90,6 +91,8 @@ let _searchExhausted = false;
 let _loadingMore = false;
 let _kindFilter = '';   // '' | movie | tv | ova | ona | special
 let _dubOnly = false;
+let _browse = null;     // null, or the Esplora filters: {list, genre, country, year, sort}
+let _browseOpts = null; // genres and countries, fetched once
 
 // Each source classifies its catalogue in its own vocabulary, so the chips are
 // rebuilt when the source changes rather than offering one of them a filter the
@@ -118,7 +121,14 @@ function renderSearchFilters() {
       `<button class="source-btn${_resultsView === view ? ' active' : ''}" ` +
       `data-action="search:view" data-view="${view}" title="${label}" aria-label="${label}">` +
       `<i class="ti ${icon}"></i></button>`).join('');
-  bar.innerHTML = chips + dub + `<div class="results-view">${views}</div>`;
+  // Esplora browses the source's archive with its own filters, so it exists only
+  // where the source has one.
+  const explore = currentSource === 'streamingcommunity'
+    ? `<button class="source-btn${_browse ? ' active' : ''}" data-action="search:browse">` +
+      `<i class="ti ti-compass"></i>Esplora</button>`
+    : '';
+  bar.innerHTML = chips + dub + explore + `<div class="results-view">${views}</div>`;
+  _renderBrowseBar();
   _applyResultsView();
 }
 
@@ -147,9 +157,79 @@ function setResultsView(view) {
   renderSearchFilters();
 }
 
+// ── Esplora ───────────────────────────────────────────────────────────────────
+//
+// StreamingCommunity's /archive filters at the source, so unlike the search a
+// page that comes back empty really is the end. A typed query takes over: the
+// box is the more deliberate act, and the two cannot be combined at the source.
+
+const BROWSE_LISTS = [['archive', 'Archivio'], ['trending', 'Di tendenza'],
+                      ['latest', 'Aggiunti di recente'], ['top10', 'Top 10']];
+const BROWSE_SORTS = [['', 'Predefinito'], ['views', 'Più visti'],
+                      ['score', 'Più votati'], ['release_date', 'Più recenti']];
+
+function _selectHtml(field, options, current) {
+  return `<select class="form-select form-select-sm" data-change="search:browse-set" data-field="${field}">` +
+    options.map(([v, l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(current) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('') +
+    '</select>';
+}
+
+function _renderBrowseBar() {
+  const host = document.getElementById('browse-bar');
+  if (!host) return;
+  host.style.display = _browse ? '' : 'none';
+  if (!_browse) { host.innerHTML = ''; return; }
+  const o = _browseOpts || {genres: [], countries: []};
+  // Genres are per kind at the source, so with no kind chosen they say which.
+  const genres = [['', 'Genere']].concat(o.genres
+    .filter(g => !_kindFilter || g.type === _kindFilter)
+    .map(g => [g.id, _kindFilter ? g.name : `${g.name} · ${g.type === 'movie' ? 'film' : 'serie'}`]));
+  const thisYear = new Date().getFullYear();
+  const years = [['', 'Anno']];
+  for (let y = thisYear; y >= 1950; y--) years.push([y, String(y)]);
+  const ranked = _browse.list !== 'archive';   // the ranked lists take no filters
+  host.innerHTML = '<div class="d-flex flex-wrap gap-2 mb-3">' +
+    _selectHtml('list', BROWSE_LISTS, _browse.list) +
+    (ranked ? '' :
+      _selectHtml('genre', genres, _browse.genre) +
+      _selectHtml('year', years, _browse.year) +
+      _selectHtml('country', [['', 'Paese']].concat(o.countries.map(c => [c.id, c.name])), _browse.country) +
+      _selectHtml('sort', BROWSE_SORTS, _browse.sort)) +
+    '</div>';
+}
+
+async function toggleBrowse() {
+  if (_browse) {
+    _browse = null;
+    renderSearchFilters();
+    _searchResults = [];
+    document.getElementById('search-results').innerHTML = '';
+    _rerunSearch();
+    return;
+  }
+  _browse = {list: 'archive', genre: '', country: '', year: '', sort: ''};
+  renderSearchFilters();
+  doSearch();
+  if (!_browseOpts) {
+    try {
+      _browseOpts = await api.get('/api/search/browse/options');
+      _renderBrowseBar();
+    } catch (e) { /* the list filters still work without the menus */ }
+  }
+}
+
+function setBrowseField(field, value) {
+  if (!_browse) return;
+  _browse[field] = value;
+  if (field === 'list') renderSearchFilters(); else _renderBrowseBar();
+  doSearch();
+}
+
 function setKindFilter(kind) {
   if (kind === _kindFilter) return;
   _kindFilter = kind;
+  // A genre belongs to one kind; keeping it would ask for a combination that matches nothing.
+  if (_browse) _browse.genre = '';
   renderSearchFilters();
   _afterFilterChange();
 }
@@ -173,7 +253,7 @@ function _rerunSearch() {
 function _afterFilterChange() {
   syncHash();
   const input = document.getElementById('search-input');
-  if (input && input.value.trim()) doSearch();
+  if ((input && input.value.trim()) || _browse) doSearch();
   else applyClientFilter();
 }
 
@@ -212,7 +292,7 @@ function renderResultCards(items, container, baseIndex,
     card.className = wrapperClass;
     card.dataset.idx = String(idx);
     const posterHtml = posterUrl
-      ? `<img src="${posterUrl}" alt="" onerror="posterError(this)">`
+      ? `<img src="${posterUrl}" alt="" loading="lazy" onerror="posterError(this)">`
       : '';
     // Movie cards carry no status ribbon: a movie can be requested again
     // freely (denied/failed/cancelled never block it), so a "richiesto" chip
@@ -246,7 +326,8 @@ function renderResultCards(items, container, baseIndex,
 async function doSearch(options) {
   const append = !!(options && options.append);
   const q = document.getElementById('search-input').value.trim();
-  if (!q) return;
+  const browsing = !q && !!_browse;
+  if (!q && !browsing) return;
   // The boot no longer blocks routing on the domain, so a search restored
   // from the address can start before it is known. Asking costs nothing once
   // it is: ensureDomain() shares the one request.
@@ -289,8 +370,15 @@ async function doSearch(options) {
   try {
     let results;
     try {
-      results = await api.get('/api/search', _searchParams(q, _searchPage),
-                              append ? undefined : {signal: _searchAbort.signal});
+      const opts = append ? undefined : {signal: _searchAbort.signal};
+      results = browsing
+        ? await api.get('/api/search/browse', {
+            list: _browse.list, page: String(_searchPage),
+            media_type: _kindFilter || undefined,
+            genre: _browse.genre || undefined, year: _browse.year || undefined,
+            country: _browse.country || undefined, sort: _browse.sort || undefined,
+          }, opts)
+        : await api.get('/api/search', _searchParams(q, _searchPage), opts);
     } catch (e) {
       if (e.name === 'AbortError') throw e;   // handled by the catch below
       const detail = escapeHtml(errText(e));
@@ -310,7 +398,7 @@ async function doSearch(options) {
     // measured, a query whose first page is sixty series has its films on a
     // later one. AnimeUnity filters at the source, where the offset walks the
     // filtered catalogue, so there an empty page really is the end.
-    const filterIsPerPage = currentSource !== 'animeunity' && !!_kindFilter;
+    const filterIsPerPage = !browsing && currentSource !== 'animeunity' && !!_kindFilter;
     _searchExhausted = !results.length && !filterIsPerPage;
 
     if (!_searchResults.length) {
@@ -369,7 +457,10 @@ function _setStartPageVisible(on) {
 // have.
 function searchPageEnter() {
   const input = document.getElementById('search-input');
-  if (!input || !input.value.trim()) { showStartPage(); return; }
+  if (!input || !(input.value.trim() || _browse)) { showStartPage(); return; }
+  if (_browse && !_browseOpts) {   // restored from the address: the menus still need filling
+    api.get('/api/search/browse/options').then(o => { _browseOpts = o; _renderBrowseBar(); }).catch(() => {});
+  }
   if (!_searchResults.length) doSearch();
   else _setStartPageVisible(false);
 }
@@ -603,6 +694,8 @@ registerActions({
   'search:kind':   d => setKindFilter(d.kind),
   'search:dub':    d => setDubOnly(d.on === '1'),
   'search:view':   d => setResultsView(d.view),
+  'search:browse': () => toggleBrowse(),
+  'search:browse-set': (d, el) => setBrowseField(d.field, el.value),
   'search:open':   d => openTitle(Number(d.idx)),
 });
 
@@ -621,6 +714,10 @@ registerPageHash('search', {
       src: currentSource === 'animeunity' ? 'animeunity' : null,
       type: _kindFilter || null,
       dub: _dubOnly ? '1' : null,
+      // Esplora has no query to restore, so its filters are the address.
+      br: _browse ? _browse.list : null,
+      g: _browse?.genre || null, c: _browse?.country || null,
+      y: _browse?.year || null, so: _browse?.sort || null,
     },
   }),
   apply: params => {
@@ -634,6 +731,8 @@ registerPageHash('search', {
     if (input) input.placeholder = currentSource === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
     _kindFilter = params.type || '';
     _dubOnly = params.dub === '1';
+    _browse = params.br ? {list: params.br, genre: params.g || '', country: params.c || '',
+                           year: params.y || '', sort: params.so || ''} : null;
     _searchResults = [];
     _searchPage = 1;
     _searchExhausted = false;

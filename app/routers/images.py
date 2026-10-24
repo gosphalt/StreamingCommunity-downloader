@@ -78,4 +78,5 @@ async def proxy_image(filename: str):
         raise HTTPException(status_code=400, detail="Nome file non valido")
 
     content, content_type = await asyncio.to_thread(_fetch_image, domain, filename)
-    return Response(content=content, media_type=content_type)
+    return Response(content=content, media_type=content_type,
+                    headers={"Cache-Control": "private, max-age=86400"})

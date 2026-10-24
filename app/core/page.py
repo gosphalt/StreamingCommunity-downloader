@@ -199,3 +199,46 @@ def search(title_search: str, domain: str, *, page: int = 1,
         titles = [t for t in titles if t.get("type") == media_type]
 
     return [t for t in (normalize_title(raw) for raw in titles[:_RESULT_CAP]) if t]
+
+
+# The lists the source serves besides its archive. top10 is ten titles and has no
+# second page; the others page sixty at a time.
+BROWSE_LISTS = ("archive", "trending", "latest", "top10")
+
+
+def browse(domain: str, *, list_name: str = "archive", page: int = 1,
+           media_type: str | None = None, genre: int | None = None,
+           year: int | None = None, country: int | None = None,
+           sort: str | None = None) -> list[dict]:
+    """A page of the source's own archive or one of its ranked lists.
+
+    Unlike ``search`` every filter here is applied **by the source**, so an
+    empty page really is the end. Only ``archive`` filters; the ranked lists
+    ignore everything but ``page``. ``genre`` and ``country`` are the source's
+    numeric ids (see ``browse_options``): its country codes match nothing.
+    """
+    if list_name not in BROWSE_LISTS:
+        raise ValueError(f"unknown list {list_name!r}")
+    params: dict = {}
+    if page > 1:
+        params["page"] = page
+    path = "/archive" if list_name == "archive" else f"/browse/{list_name}"
+    if list_name == "archive":
+        for key, value in (("type", media_type), ("year", year), ("sort", sort),
+                           ("genre[]", genre), ("country[]", country)):
+            if value:
+                params[key] = value
+    props = fetch_site_props(domain, path, params=params)
+    return [t for t in (normalize_title(raw)
+                        for raw in (props.get("titles") or [])[:_RESULT_CAP]) if t]
+
+
+def browse_options(domain: str) -> dict:
+    """What the archive can be filtered by, read from the archive page itself."""
+    props = fetch_site_props(domain, "/archive")
+    return {
+        "genres": [{"id": g["id"], "name": g["name"], "type": g.get("type")}
+                   for g in props.get("genres") or [] if not g.get("hidden")],
+        "countries": [{"id": c["id"], "name": c["name"]}
+                      for c in props.get("countries") or []],
+    }

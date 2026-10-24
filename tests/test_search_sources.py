@@ -536,3 +536,32 @@ def test_no_configured_domain_is_still_a_409(client, signed_in, monkeypatch):
 
     assert client.get("/api/search?q=abc").status_code == 409
     assert client.get("/api/search?q=abc&source=animeunity").status_code != 409
+
+
+# ── StreamingCommunity browse ─────────────────────────────────────────────────
+
+def test_browse_archive_sends_the_sources_own_filters(monkeypatch):
+    seen = {}
+
+    def fake(domain, path="", *, params=None, timeout=10):
+        seen["path"], seen["params"] = path, params
+        return {"titles": [_title(1)]}
+
+    monkeypatch.setattr(page, "fetch_site_props", fake)
+    out = page.browse("example.test", page=2, media_type="movie", genre=4,
+                      year=2020, country=11, sort="views")
+    assert seen["path"] == "/archive"
+    assert seen["params"] == {"page": 2, "type": "movie", "year": 2020, "sort": "views",
+                              "genre[]": 4, "country[]": 11}
+    assert [t["id"] for t in out] == [1]
+
+
+def test_browse_ranked_list_ignores_filters(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(page, "fetch_site_props",
+                        lambda d, path="", *, params=None, timeout=10:
+                        seen.update(path=path, params=params) or {"titles": []})
+    page.browse("example.test", list_name="trending", genre=4)
+    assert seen == {"path": "/browse/trending", "params": {}}
+    with pytest.raises(ValueError):
+        page.browse("example.test", list_name="nope")
