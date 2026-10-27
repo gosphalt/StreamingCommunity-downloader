@@ -216,8 +216,9 @@ def _post_archive(body: dict):
     return r
 
 
-def search(query: str, *, page: int = 1, media_type: str | None = None,
-           dubbed: bool = False) -> list[dict]:
+def search(query: str = "", *, page: int = 1, media_type: str | None = None,
+           dubbed: bool = False, genre: int | None = None, year: int | None = None,
+           order: str | None = None, status: str | None = None) -> list[dict]:
     """Search AnimeUnity through ``/archivio/get-animes``.
 
     Not ``/livesearch``, which this used to call: the source caps that at
@@ -228,12 +229,20 @@ def search(query: str, *, page: int = 1, media_type: str | None = None,
     Both filters go to the source rather than to what comes back: filtering here
     could only ever narrow one page, and would answer "no Italian dub" for a show
     whose dub sat on page two. ``page`` is 1-based and becomes the row offset.
+
+    An empty ``query`` is the archive itself, which is what Esplora browses;
+    ``genre`` (the source's id), ``year``, ``order`` and ``status`` are its filters.
     """
     body = {"title": query, "offset": (max(page, 1) - 1) * ARCHIVE_PAGE}
     if dubbed:
         body["dubbed"] = 1
     if media_type:
         body["type"] = TYPES.get(media_type.lower(), media_type)
+    if genre:
+        body["genres"] = [{"id": genre}]
+    for key, value in (("year", year), ("order", order), ("status", status)):
+        if value:
+            body[key] = value
 
     r = _post_archive(body)
     if not r.ok:
@@ -251,6 +260,15 @@ def search(query: str, *, page: int = 1, media_type: str | None = None,
     # gives. This used to raise, which reached the panel as a red error box
     # saying the search had broken when the query simply matched nothing.
     return _normalize_titles(records)
+
+
+def browse_options() -> dict:
+    """The genres the archive can be filtered by, read from the archive page itself."""
+    r = _get_scraper().get(f"https://{host()}/archivio", timeout=20)
+    r.raise_for_status()
+    tag = BeautifulSoup(r.text, "html.parser").find("archivio")
+    genres = json.loads(tag["all_genres"]) if tag and tag.get("all_genres") else []
+    return {"genres": [{"id": g["id"], "name": g["name"]} for g in genres]}
 
 
 def get_episodes(anime_id: str) -> list[dict]:

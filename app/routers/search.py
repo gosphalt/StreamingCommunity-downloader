@@ -78,30 +78,50 @@ async def search(
 
 @router.get("/browse")
 async def browse(
+    source: str = Query(default="streamingcommunity",
+                        pattern="^(streamingcommunity|animeunity)$"),
     list: str = Query(default="archive", pattern="^(" + "|".join(BROWSE_LISTS) + ")$"),
     page: int = Query(default=1, ge=1, le=50),
-    media_type: str | None = Query(default=None, pattern="^(movie|tv)$"),
+    media_type: str | None = Query(default=None, pattern="^(movie|tv|ova|ona|special)$"),
     genre: int | None = Query(default=None, ge=1),
     country: int | None = Query(default=None, ge=1),
     year: int | None = Query(default=None, ge=1900, le=2100),
     sort: str | None = Query(default=None, pattern="^(views|score|release_date)$"),
+    # AnimeUnity's own vocabulary, fixed here so a free string never reaches it.
+    order: str | None = Query(default=None, pattern="^(Popolarità|Valutazione|Più visti|Lista A-Z)$"),
+    status: str | None = Query(default=None, pattern="^(In Corso|Terminato)$"),
 ):
-    """StreamingCommunity's archive and ranked lists, filtered by the source."""
-    domain = _domain()
+    """The source's archive (StreamingCommunity also its ranked lists), filtered by the source."""
     try:
+        if source == "animeunity":
+            return await asyncio.to_thread(
+                animeunity.search, "", page=page, media_type=media_type,
+                genre=genre, year=year, order=order, status=status)
+        if media_type and media_type not in ("movie", "tv"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Tipo '{media_type}' non valido per StreamingCommunity")
+        domain = _domain()
         return await asyncio.to_thread(
             core_browse, domain, list_name=list, page=page, media_type=media_type,
             genre=genre, year=year, country=country, sort=sort)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Browse error")
         raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/browse/options")
-async def browse_options():
-    domain = _domain()
+async def browse_options(source: str = Query(default="streamingcommunity",
+                                              pattern="^(streamingcommunity|animeunity)$")):
     try:
+        if source == "animeunity":
+            return await asyncio.to_thread(animeunity.browse_options)
+        domain = _domain()
         return await asyncio.to_thread(core_browse_options, domain)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Browse options error")
         raise HTTPException(status_code=502, detail=str(e))

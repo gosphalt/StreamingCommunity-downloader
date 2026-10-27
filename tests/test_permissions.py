@@ -35,6 +35,7 @@ def _no_outbound_source(monkeypatch):
     monkeypatch.setattr(search_router, "core_browse", lambda *a, **kw: [])
     monkeypatch.setattr(search_router, "core_browse_options", lambda *a, **kw: {})
     monkeypatch.setattr(animeunity, "search", lambda *a, **kw: [])
+    monkeypatch.setattr(animeunity, "browse_options", lambda *a, **kw: {})
     monkeypatch.setattr(home, "shelves", lambda *a, **kw: [])
 
 

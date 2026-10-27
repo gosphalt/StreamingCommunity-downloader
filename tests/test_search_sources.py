@@ -565,3 +565,28 @@ def test_browse_ranked_list_ignores_filters(monkeypatch):
     assert seen == {"path": "/browse/trending", "params": {}}
     with pytest.raises(ValueError):
         page.browse("example.test", list_name="nope")
+
+
+# ── AnimeUnity browse ─────────────────────────────────────────────────────────
+
+def test_animeunity_browse_sends_an_empty_title_and_the_sources_filters(monkeypatch):
+    seen = {}
+
+    class R:
+        ok = True
+        status_code = 200
+        def json(self): return {"records": []}
+
+    monkeypatch.setattr(animeunity, "_post_archive", lambda body: seen.update(body) or R())
+    animeunity.search("", page=2, media_type="ova", genre=37, year=2020,
+                      order="Più visti", status="In Corso")
+    assert seen == {"title": "", "offset": 30, "type": "OVA", "genres": [{"id": 37}],
+                    "year": 2020, "order": "Più visti", "status": "In Corso"}
+
+
+def test_browse_endpoint_routes_animeunity_and_refuses_its_kinds_for_sc(client, signed_in, monkeypatch):
+    calls = []
+    monkeypatch.setattr(animeunity, "search", lambda *a, **kw: calls.append((a, kw)) or [])
+    assert client.get("/api/search/browse?source=animeunity&media_type=ova&genre=3").status_code == 200
+    assert calls and calls[0][0] == ("",) and calls[0][1]["genre"] == 3
+    assert client.get("/api/search/browse?media_type=ova").status_code == 422
