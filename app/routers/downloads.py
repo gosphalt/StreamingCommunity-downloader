@@ -446,7 +446,11 @@ def fire_now(job_id: str):
 # permission approvers hold for stopping what they approved.
 @router.post("/{job_id}/retry", status_code=202, dependencies=CAN_DOWNLOAD)
 def retry(job_id: str):
-    new_id = job_manager.retry(job_id)
+    try:
+        new_id = job_manager.retry(job_id)
+    except Exception as e:
+        # The failed job stays where it is: nothing was removed before this.
+        raise HTTPException(status_code=502, detail=f"Dominio {configured_domain()} non raggiungibile: {e}")
     if new_id is None:
         raise HTTPException(status_code=404, detail="Job non trovato o non fallito")
     return {"job_id": new_id, "replaces": job_id, "status": "queued"}

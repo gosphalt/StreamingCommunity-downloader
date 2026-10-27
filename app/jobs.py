@@ -475,8 +475,35 @@ class JobManager:
         self._broadcast({"type": "job_dismissed", "job_id": job_id})
         return True
 
+    @staticmethod
+    def _on_current_domain(fn, args: tuple) -> tuple:
+        """The call's arguments, moved onto the source domain configured now.
+
+        A job remembers the domain it was started with, so when the source
+        rotates a retry would knock on the dead one again. The domain comes
+        from the configuration, never from the client. A series episode also
+        carries an XSRF token that belongs to the domain that issued it, so it
+        is fetched again. AnimeUnity reads its host per call and needs nothing.
+        Raises (before anything is removed) if the new domain cannot be reached.
+        """
+        from app.config import configured_domain
+        from app.core.film import download_film
+        from app.core.tv import download_episode, get_token
+
+        domain = configured_domain()
+        if not domain:
+            return args
+        if fn is download_film and args[2] != domain:
+            return (*args[:2], domain, *args[3:])
+        if fn is download_episode and args[3] != domain:
+            return (*args[:3], domain, get_token(args[0], domain), *args[5:])
+        return args
+
     def retry(self, job_id: str) -> Optional[str]:
         """Run a failed job again as a new job; returns the new job id.
+
+        If the source domain changed since the job was started, the new job runs
+        against the current one.
 
         The failed entry goes away in the same step, so a second failure makes a
         fresh entry instead of a duplicate. The new job leaves the batch it came
@@ -485,9 +512,13 @@ class JobManager:
         or land in a batch that no longer exists. A retry succeeding is
         therefore announced on its own.
         """
+        old = self._jobs.get(job_id)
+        if not old or old.status != "error" or old.call is None:
+            return None
+        fn, args, kwargs = old.call
+        args = self._on_current_domain(fn, args)
         with self._lock:
-            old = self._jobs.get(job_id)
-            if not old or old.status != "error" or old.call is None:
+            if self._jobs.get(job_id) is not old:
                 return None
             del self._jobs[job_id]
         if self._schedule_store is not None:
@@ -500,7 +531,6 @@ class JobManager:
             season=old.season, episode_number=old.episode_number,
             external_id=old.external_id,
         )
-        fn, args, kwargs = old.call
         return self._submit_job(
             job, fn, *args, **kwargs,
             temp_dir=str(TMP_DIR / job.job_id),
