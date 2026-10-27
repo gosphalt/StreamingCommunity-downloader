@@ -308,6 +308,7 @@ function renderResultCards(items, container, baseIndex,
           <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
           <div class="poster-overlay"></div>
           ${ribbonHtml}
+          <button class="fav-btn" data-action="fav:toggle" data-idx="${idx}" aria-label="Preferiti"></button>
           <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
         </div>
         <div class="card-meta">
@@ -321,6 +322,7 @@ function renderResultCards(items, container, baseIndex,
       </div>`;
     container.appendChild(card);
   });
+  paintFavorites();
 }
 
 async function doSearch(options) {

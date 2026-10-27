@@ -266,6 +266,17 @@
           <div id="my-requests-list"></div>
         </div>
 
+        <!-- ── Favorites ───────────────────────────────────────── -->
+        <div id="page-favorites" style="display:none">
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Preferiti</h1>
+              <p class="pg-sub">I titoli che hai segnato con il cuore dalla ricerca.</p>
+            </div>
+          </div>
+          <div class="row g-3" id="favorites-grid"></div>
+        </div>
+
         <!-- ── Followed series ─────────────────────────────────── -->
         <div id="page-watches" style="display:none">
           <div class="pg-head">
@@ -345,6 +356,7 @@
 <script src="{{ asset('page-downloads.js') }}"></script>
 <script src="{{ asset('page-requests.js') }}"></script>
 <script src="{{ asset('page-watches.js') }}"></script>
+<script src="{{ asset('page-favorites.js') }}"></script>
 <script src="{{ asset('page-users.js') }}"></script>
 <script src="{{ asset('page-files.js') }}"></script>
 <script src="{{ asset('page-settings.js') }}"></script>

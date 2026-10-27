@@ -125,6 +125,20 @@
 
     #search-more .source-btn { display: inline-flex; }
 
+    /* The heart on a card. Top-left, because the status ribbon owns top-right. */
+    .fav-btn {
+      position: absolute; top: 6px; left: 6px; z-index: 4;
+      width: 28px; height: 28px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 50%;
+      background: rgba(7,10,18,.62); color: #fff; font-size: 15px;
+      opacity: 0; transition: opacity .15s, color .15s;
+    }
+    .result-card:hover .fav-btn, .fav-btn.on, .fav-btn:focus-visible { opacity: 1; }
+    .fav-btn.on { color: #f0506e; }
+    @media (hover: none) { .fav-btn { opacity: 1; } }
+    .results-list .fav-btn { top: auto; bottom: 8px; left: auto; right: 12px; }
+
     /* ═══════════════════════════════════════════════════════
        START PAGE — the source's own shelves
        ═══════════════════════════════════════════════════════ */

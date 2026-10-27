@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSearchFilters();
   refreshNotifications();
   refreshQueueBadge();
+  ensureFavorites();
 });
 
 function defaultPage() {
@@ -181,14 +182,14 @@ function closeMobileMenu() {
 function showPage(page, params = null) {
   closeMobileMenu();
   if (params) PAGE_HASH[page]?.apply?.(params);
-  ['search','downloads','files','requests','my-requests','watches','users','detail','settings'].forEach(p => {
+  ['search','downloads','files','requests','my-requests','watches','favorites','users','detail','settings'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.style.display = p === page ? '' : 'none';
   });
   document.getElementById('page-title').textContent = {
     search:'Cerca', downloads:'Download', files:'File',
     requests:'Coda richieste', 'my-requests':'Le mie richieste',
-    watches:'Serie seguite', users:'Utenti', detail:'', settings:'Impostazioni',
+    watches:'Serie seguite', favorites:'Preferiti', users:'Utenti', detail:'', settings:'Impostazioni',
   }[page] ?? 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
@@ -201,6 +202,7 @@ function showPage(page, params = null) {
   if (page === 'requests') loadRequestQueue();
   if (page === 'my-requests') loadMyRequests();
   if (page === 'watches') loadWatches();
+  if (page === 'favorites') loadFavorites();
   if (page === 'users') loadUsersPage();
   // Every page has an address now. This used to do the opposite — strip the
   // hash on the way out of the two pages that had one — because they were the

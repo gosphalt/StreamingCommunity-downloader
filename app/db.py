@@ -507,6 +507,33 @@ _V10_LIBRARY_FOLDERS = [
 ]
 
 
+_V11_FAVORITES = [
+    # A title a user has starred in the search. Per user, and ownerless without
+    # accounts (user_id NULL = the panel itself), the way a watch is. `kind` is
+    # what the title page's address needs (movie | tv | anime); the source is
+    # implied by it, but stored so a row does not depend on that rule staying.
+    """
+    CREATE TABLE jf_favorite (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER REFERENCES jf_user(id) ON DELETE CASCADE,
+        source      TEXT NOT NULL,
+        kind        TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        slug        TEXT,
+        title       TEXT NOT NULL,
+        year        TEXT,
+        poster      TEXT,
+        anime_type  TEXT,
+        created_at  TEXT NOT NULL
+    )
+    """,
+    # NULLs are distinct in a plain UNIQUE, which would let the panel's own
+    # favorites duplicate; COALESCE makes "no account" one owner.
+    "CREATE UNIQUE INDEX jf_favorite_unique ON jf_favorite("
+    "COALESCE(user_id, 0), source, kind, external_id)",
+]
+
+
 Migration = list[str] | Callable[[sqlite3.Connection, bool], None]
 
 MIGRATIONS: list[Migration] = [
@@ -520,6 +547,7 @@ MIGRATIONS: list[Migration] = [
     _v8_carry_over_open_mode,
     _V9_FOLLOWER_LANGUAGES,
     _V10_LIBRARY_FOLDERS,
+    _V11_FAVORITES,
 ]
 
 
