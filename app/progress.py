@@ -54,6 +54,11 @@ class WebProgressBar:
         # see across phases.
         self.prior_bytes = 0
 
+        # Set by the job's factory. While it is set, update() holds the segment
+        # thread, so a pause lands at the next segment boundary; the in-flight
+        # requests finish first. Cancel clears it so a paused job can be stopped.
+        self.pause_event: Optional[threading.Event] = None
+
     def _speed_and_eta(self) -> tuple[float, Optional[float], float]:
         now = time.monotonic()
         cutoff = now - self._SPEED_WINDOW
@@ -132,7 +137,13 @@ class WebProgressBar:
             msg = self._build_message()
         self._emit(msg)
 
+    @property
+    def paused(self) -> bool:
+        return self.pause_event is not None and self.pause_event.is_set()
+
     def update(self, n=1, bytes=0):
+        while self.paused:
+            time.sleep(0.25)
         with self._lock:
             self.n += n
             self._bytes += bytes

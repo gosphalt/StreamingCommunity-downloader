@@ -58,6 +58,11 @@ class DownloadJob:
     phases: list = field(default_factory=list)
     progress_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    # Set while the job is paused: a waiting one is passed over for a slot, a
+    # running one stops fetching at the next segment (WebProgressBar.update).
+    pause_event: threading.Event = field(default_factory=threading.Event)
+    # Higher goes first when a slot frees up, whatever batch the job is in.
+    priority: int = 0
 
     # Set when this job is one episode of a season or series asked for in one go,
     # so the notification can be a single summary instead of one per episode.
@@ -130,6 +135,9 @@ class DownloadSlots:
 
     A waiter leaves the line as soon as its job is cancelled instead of
     holding its place until a slot frees up.
+
+    Arrival order is the tie-break: a higher ``priority`` goes first, and a
+    paused job is passed over until it is resumed.
     """
 
     def __init__(self, limit: int):
@@ -138,6 +146,12 @@ class DownloadSlots:
         self._busy = 0
         self._line: deque = deque()
         self._tickets = 0
+
+    def _next(self) -> Optional["DownloadJob"]:
+        """The job that gets the next free slot. Caller holds the lock."""
+        ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
+        # min on (-priority, ticket): deque order is ticket order, so max() keeps the first.
+        return max(ready, key=lambda j: j.priority, default=None)
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
         """Wait for a slot. False when the job was cancelled while waiting."""
@@ -149,7 +163,7 @@ class DownloadSlots:
             on_queued(job)
         with self._cond:
             try:
-                while not (self._line[0] is job and self._busy < self._limit):
+                while not (self._next() is job and self._busy < self._limit):
                     if job.cancel_event.is_set():
                         return False
                     self._cond.wait()
@@ -174,7 +188,8 @@ class DownloadSlots:
             self._cond.notify_all()
 
     def wake(self) -> None:
-        """Let waiters re-check: a cancelled one leaves the line."""
+        """Let waiters re-check: a cancelled one leaves the line, and a pause or
+        priority change reorders who is next."""
         with self._cond:
             self._cond.notify_all()
 
@@ -245,6 +260,8 @@ class JobManager:
             "year": job.year,
             "retries": job.retries,
             "queue_seq": job.queue_seq,
+            "priority": job.priority,
+            "paused": job.pause_event.is_set(),
             "max_retries": AUTO_RETRIES,
             "retry_at": job.retry_at.isoformat() if job.retry_at else None,
         }
@@ -353,6 +370,7 @@ class JobManager:
             bar = WebProgressBar(total, job.progress_queue, loop, phase=phase, on_event=on_event)
             # Carry what the earlier phases already downloaded, so the readout
             # climbs across the whole job instead of restarting at each one.
+            bar.pause_event = job.pause_event
             bar.prior_bytes = bars[-1].bytes_done if bars else 0
             bars.append(bar)
             return bar
@@ -456,11 +474,34 @@ class JobManager:
             # notifies on every path.
             was_scheduled = job.status == "scheduled"
             job.cancel_event.set()
+            job.pause_event.clear()  # a paused download must wake up to see the cancel
             job.status = "cancelled"
         self._slots.wake()
         self._emit(job, {"type": "error", "message": "Annullato"})
         if was_scheduled:
             self._notify_listeners(job)
+        return True
+
+    def set_paused(self, job_id: str, paused: bool) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in ("scheduled", "queued", "running"):
+                return False
+            (job.pause_event.set if paused else job.pause_event.clear)()
+        self._slots.wake()
+        self._broadcast({"type": "job_flags", "job_id": job_id,
+                         "paused": paused, "priority": job.priority})
+        return True
+
+    def set_priority(self, job_id: str, priority: int) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in ("scheduled", "queued", "running"):
+                return False
+            job.priority = priority
+        self._slots.wake()
+        self._broadcast({"type": "job_flags", "job_id": job_id,
+                         "paused": job.pause_event.is_set(), "priority": priority})
         return True
 
     def dismiss(self, job_id: str) -> bool:

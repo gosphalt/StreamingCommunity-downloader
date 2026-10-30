@@ -106,6 +106,16 @@
               </button>
             </div>
           </div>
+          <div class="d-flex align-items-center gap-2 mb-2" id="dl-bulk" style="display:none">
+            <input type="checkbox" class="form-check-input m-0" data-change="jobs:selectAll" title="Seleziona tutti quelli visibili">
+            <span class="text-muted small" id="dl-bulk-scope">Tutti</span>
+            <button class="btn btn-sm btn-outline-secondary" data-action="jobs:bulk" data-bulk="pause"><i class="ti ti-player-pause me-1"></i>Pausa</button>
+            <button class="btn btn-sm btn-outline-success" data-action="jobs:bulk" data-bulk="resume"><i class="ti ti-player-play me-1"></i>Riprendi</button>
+            <button class="btn btn-sm btn-outline-danger" data-action="jobs:bulk" data-bulk="cancel"><i class="ti ti-player-stop me-1"></i>Interrompi</button>
+            <select class="form-select form-select-sm w-auto" data-change="jobs:bulkPriority" title="Imposta la priorità">
+              <option value="">Priorità…</option><option value="10">Alta</option><option value="0">Normale</option><option value="-10">Bassa</option>
+            </select>
+          </div>
           <div class="pg-bar" id="dl-filters">
             <button class="queue-filter active" data-action="jobs:filter" data-filter="all">Tutti</button>
             <button class="queue-filter" data-action="jobs:filter" data-filter="running">In corso</button>

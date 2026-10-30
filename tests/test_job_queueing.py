@@ -135,3 +135,34 @@ def test_a_job_cancelled_while_waiting_leaves_the_line_at_once():
     finally:
         gate.set()
         jm._executor.shutdown(wait=False)
+
+
+def test_higher_priority_jumps_the_line_and_paused_is_skipped():
+    jm = JobManager()
+    jm.update_max_concurrent(1)
+    order, gate = [], threading.Event()
+
+    def blocker(*a, **k):
+        gate.wait(timeout=3)
+
+    def record(name):
+        return lambda *a, **k: order.append(name)
+
+    try:
+        first = jm._make_job("first", "film")
+        jm._submit_job(first, blocker)
+        assert _wait_for(lambda: first.status == "running")
+        low, high, held = (jm._make_job(n, "film") for n in ("low", "high", "held"))
+        for j in (low, held, high):
+            jm._submit_job(j, record(j.title))
+            time.sleep(0.05)
+        jm.set_priority(high.job_id, 10)
+        jm.set_paused(held.job_id, True)
+        gate.set()
+        assert _wait_for(lambda: order == ["high", "low"])
+        assert held.status == "queued"
+        jm.set_paused(held.job_id, False)
+        assert _wait_for(lambda: order == ["high", "low", "held"])
+    finally:
+        gate.set()
+        jm._executor.shutdown(wait=False)

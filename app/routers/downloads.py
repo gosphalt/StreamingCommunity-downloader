@@ -2,6 +2,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -454,6 +455,28 @@ def retry(job_id: str):
     if new_id is None:
         raise HTTPException(status_code=404, detail="Job non trovato o non fallito")
     return {"job_id": new_id, "replaces": job_id, "status": "queued"}
+
+
+class BulkAction(BaseModel):
+    action: Literal["pause", "resume", "cancel", "priority"]
+    # Omitted means every job the action applies to.
+    job_ids: Optional[list[str]] = Field(default=None, max_length=2000)
+    priority: Optional[int] = Field(default=None, ge=-100, le=100)
+
+
+@router.post("/bulk", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def bulk(body: BulkAction):
+    """Pause, resume, stop or reprioritise many jobs; only the ones it applies to are touched."""
+    if body.action == "priority" and body.priority is None:
+        raise HTTPException(status_code=422, detail="priority mancante")
+    ids = body.job_ids if body.job_ids is not None else [j["job_id"] for j in job_manager.list_jobs()]
+    do = {
+        "pause": lambda i: job_manager.set_paused(i, True),
+        "resume": lambda i: job_manager.set_paused(i, False),
+        "cancel": job_manager.cancel,
+        "priority": lambda i: job_manager.set_priority(i, body.priority),
+    }[body.action]
+    return {"changed": [i for i in ids if do(i)]}
 
 
 @router.delete("/{job_id}", status_code=200, dependencies=CAN_CONTROL_JOBS)

@@ -60,6 +60,12 @@ function connectGlobalStream() {
           updateActiveBadge();
         }
         break;
+      case 'job_flags':
+        if (_jobs.has(msg.job_id)) {
+          Object.assign(_jobs.get(msg.job_id), {paused: msg.paused, priority: msg.priority});
+          renderAllJobCards();
+        }
+        break;
       case 'progress':
         handleProgressEvent(msg);
         break;
@@ -237,6 +243,20 @@ function _fireBtnHtml(jobId) {
   return `<button class="btn btn-sm btn-outline-success ms-1" data-action="jobs:fire"
                   data-job="${jobId}" title="Lancia subito"><i class="ti ti-player-play"></i></button>`;
 }
+const _PRIORITIES = [[10, 'Alta'], [0, 'Normale'], [-10, 'Bassa']];
+
+function _priorityOptions(current) {
+  return _PRIORITIES.map(([v, l]) => `<option value="${v}"${v === current ? ' selected' : ''}>${l}</option>`).join('');
+}
+
+function _controlsHtml(j) {
+  const pause = j.paused
+    ? `<button class="btn btn-sm btn-outline-success ms-1" data-action="jobs:resume" data-job="${j.job_id}" title="Riprendi"><i class="ti ti-player-play"></i></button>`
+    : `<button class="btn btn-sm btn-outline-secondary ms-1" data-action="jobs:pause" data-job="${j.job_id}" title="Metti in pausa"><i class="ti ti-player-pause"></i></button>`;
+  const prio = `<select class="form-select form-select-sm ms-1 w-auto" data-change="jobs:priority" data-job="${j.job_id}" title="Priorità">${_priorityOptions(j.priority || 0)}</select>`;
+  return prio + pause;
+}
+
 function _stopBtnHtml(jobId) {
   return `<button class="btn btn-sm btn-outline-danger ms-1" data-action="jobs:cancel"
                   data-job="${jobId}" title="Interrompi"><i class="ti ti-player-stop"></i></button>`;
@@ -254,17 +274,23 @@ function _retryText(j) {
 // grants slots strictly in ticket order (app/jobs.py, DownloadSlots), so the
 // number is a promise it keeps. A job between retries holds no ticket: it is
 // not in the line yet, and _retryText says when it rejoins.
+function _goesFirst(a, b) {
+  const pa = a.priority || 0, pb = b.priority || 0;
+  return pa !== pb ? pa > pb : a.queue_seq < b.queue_seq;
+}
+
 function _queuePosition(j) {
   if (j.queue_seq == null) return null;
   let ahead = 0;
   _jobs.forEach(o => {
-    if (o.status === 'queued' && o.queue_seq != null && o.queue_seq < j.queue_seq) ahead += 1;
+    if (o.status === 'queued' && o.queue_seq != null && !o.paused && _goesFirst(o, j)) ahead += 1;
   });
   return ahead + 1;
 }
 
 function _waitingText(j) {
   const position = _queuePosition(j);
+  if (j.paused) return 'In pausa';
   if (position == null) return 'In coda';
   return position === 1 ? 'Il prossimo a partire' : `${position}° in coda`;
 }
@@ -288,7 +314,7 @@ function _buildJobCard(j) {
   const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
   const barWidth = j.status==='queued' ? 0 : (j.status==='done' ? 100 : pct);
   const badgeClass = _phaseBadge(phase);
-  const label = _phaseLabel(phase);
+  const label = j.paused && isActive ? 'In pausa' : _phaseLabel(phase);
   const borderColor = _phaseBorder(phase);
 
 
@@ -312,9 +338,11 @@ function _buildJobCard(j) {
   return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
+        ${isActive && can('DOWNLOAD') ? `<input type="checkbox" class="form-check-input flex-shrink-0 m-0" data-change="jobs:select" data-job="${j.job_id}"${_dlSelected.has(j.job_id) ? ' checked' : ''}>` : ''}
         <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':'TV'}</span>
         <span class="fw-medium text-truncate flex-1" style="min-width:0" title="${escapeHtml(j.title)}">${escapeHtml(j.title)}</span>
         <span class="badge ${badgeClass} flex-shrink-0" id="job-badge-${j.job_id}">${label}</span>
+        ${j.status === 'queued' || j.status === 'running' ? _controlsHtml(j) : ''}
         <span id="job-fire-${j.job_id}">${fireBtn}</span>
         ${stopBtn ? `<span id="job-stop-${j.job_id}">${stopBtn}</span>` : `<span id="job-stop-${j.job_id}"></span>`}
       </div>
@@ -369,6 +397,8 @@ function _jobOrder(a, b) {
   const ra = _BUCKET_RANK[_jobBucket(a)] ?? 3, rb = _BUCKET_RANK[_jobBucket(b)] ?? 3;
   if (ra !== rb) return ra - rb;
   if (ra === 1) {
+    if (a.queue_seq != null && b.queue_seq != null && a.queue_seq !== b.queue_seq)
+      return _goesFirst(a, b) ? -1 : 1;
     const sa = a.queue_seq ?? Infinity, sb = b.queue_seq ?? Infinity;
     if (sa !== sb) return sa - sb;
     return new Date(a.created_at) - new Date(b.created_at);
@@ -410,6 +440,12 @@ function renderDlStats() {
     `<span class="pg-stat ${counts[key] ? cls : 'pg-stat-zero'}">
        <b>${counts[key]}</b><span>${label}</span>
      </span>`).join('');
+  const bulk = document.getElementById('dl-bulk');
+  if (bulk) {
+    bulk.style.display = counts.running + counts.waiting && can('DOWNLOAD') ? '' : 'none';
+    const n = [..._dlSelected].filter(id => _jobs.has(id)).length;
+    document.getElementById('dl-bulk-scope').textContent = n ? `${n} selezionati` : 'Tutti';
+  }
   const retryAll = document.getElementById('dl-retry-btn');
   if (retryAll) retryAll.style.display = counts.error && can('DOWNLOAD') ? '' : 'none';
 }
@@ -679,6 +715,38 @@ async function fireNow(jobId) {
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
+const _dlSelected = new Set();   // job ids ticked for a bulk action
+
+// The ticked jobs, or every unfinished one when nothing is ticked.
+function _bulkTargets() {
+  const ids = [..._dlSelected].filter(id => _jobs.has(id));
+  return ids.length ? ids : [..._jobs.values()].filter(_isUnfinished).map(j => j.job_id);
+}
+
+async function bulkAction(action, extra = {}, ids = _bulkTargets()) {
+  if (!ids.length) return;
+  if (action === 'cancel' && !await scConfirm(`Interrompere ${ids.length} download?`)) return;
+  try {
+    await api.post('/api/download/bulk', {action, job_ids: ids, ...extra});
+  } catch(e) { showToast(errText(e), 'danger'); }
+  if (action === 'cancel') _dlSelected.clear();
+  renderAllJobCards();
+}
+
+function toggleSelect(jobId, on) {
+  on ? _dlSelected.add(jobId) : _dlSelected.delete(jobId);
+  renderDlStats();
+}
+
+function selectAllVisible(on) {
+  _jobs.forEach(j => {
+    if (_isUnfinished(j) && (_dlFilter === 'all' || _jobBucket(j) === _dlFilter)) {
+      on ? _dlSelected.add(j.job_id) : _dlSelected.delete(j.job_id);
+    }
+  });
+  renderAllJobCards();
+}
+
 async function cancelJob(jobId) {
   if (!await scConfirm('Interrompere il download?')) return;
   try {
@@ -752,6 +820,13 @@ registerActions({
   'jobs:filter':      d => setDlFilter(d.filter),
   'jobs:fire':        d => fireNow(d.job),
   'jobs:cancel':      d => cancelJob(d.job),
+  'jobs:pause':       d => bulkAction('pause', {}, [d.job]),
+  'jobs:resume':      d => bulkAction('resume', {}, [d.job]),
+  'jobs:priority':    (d, el) => bulkAction('priority', {priority: Number(el.value)}, [d.job]),
+  'jobs:bulkPriority': (d, el) => { if (el.value !== '') bulkAction('priority', {priority: Number(el.value)}).then(() => { el.value = ''; }); },
+  'jobs:select':      (d, el) => toggleSelect(d.job, el.checked),
+  'jobs:selectAll':   (d, el) => selectAllVisible(el.checked),
+  'jobs:bulk':        d => bulkAction(d.bulk),
   'jobs:retry':       d => retryJob(d.job),
   'jobs:retryFailed': () => retryFailed(),
   'jobs:dismiss':     d => dismissJob(d.job),

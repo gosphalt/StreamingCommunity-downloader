@@ -769,7 +769,8 @@ class M3U8_Segments:
 
         while not quit_event.is_set():
             current_count = progress_counter.n
-            if current_count != last_count:
+            # A pause is not a stall.
+            if current_count != last_count or getattr(progress_counter, "paused", False):
                 start_time = time.time()
                 last_count = current_count
 
