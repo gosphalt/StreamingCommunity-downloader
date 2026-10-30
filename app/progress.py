@@ -62,6 +62,9 @@ class WebProgressBar:
         # Hands the download slot back meanwhile (app.jobs.JobManager._hold).
         self.on_pause: Optional[Callable[[], None]] = None
         self.closed = False
+        # True while a paused download is out of its slot, including the wait
+        # after the resume: the stall watchdog must not count that as a stall.
+        self.yielded: Optional[Callable[[], bool]] = None
 
     def _speed_and_eta(self) -> tuple[float, Optional[float], float]:
         now = time.monotonic()
@@ -143,7 +146,8 @@ class WebProgressBar:
 
     @property
     def paused(self) -> bool:
-        return self.pause_event is not None and self.pause_event.is_set()
+        return (self.pause_event is not None and self.pause_event.is_set()) or \
+            (self.yielded is not None and self.yielded())
 
     def update(self, n=1, bytes=0):
         if self.paused and self.on_pause:

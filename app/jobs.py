@@ -205,7 +205,10 @@ class JobManager:
     def __init__(self):
         self._jobs: dict[str, DownloadJob] = {}
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=64)
+        # One thread per job waiting for a slot, so a job can only be reordered by
+        # priority once it has one: this must cover a full batch (MAX_BATCH_JOBS).
+        # shortcut: several big batches at once exceed it, then a dispatcher.
+        self._executor = ThreadPoolExecutor(max_workers=600)
         self._slots = DownloadSlots(get_settings().get("max_concurrent_downloads", 3))
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: list[asyncio.Queue] = []
@@ -379,6 +382,7 @@ class JobManager:
             # climbs across the whole job instead of restarting at each one.
             bar.pause_event = job.pause_event
             bar.on_pause = lambda: manager._hold(job)
+            bar.yielded = lambda: job.slot_yielded
             job.bar = bar
             bar.prior_bytes = bars[-1].bytes_done if bars else 0
             bars.append(bar)

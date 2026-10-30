@@ -24,26 +24,29 @@ CAN_VIEW = [Depends(require(Permission.VIEW_LIBRARY))]
 CAN_MANAGE = [Depends(require(Permission.MANAGE_FILES))]
 
 
-def _safe_path(rel_path: str) -> Path:
-    """Resolve path and ensure it's inside VIDEOS_DIR (prevent traversal)."""
-    base = VIDEOS_DIR.resolve()
-    target = (base / rel_path).resolve()
-    if not target.is_relative_to(base):
-        raise HTTPException(status_code=400, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return target
-
-
 def _safe_path_strict(rel_path: str) -> Path:
-    """Like _safe_path but raises ValueError/FileNotFoundError instead of HTTPException."""
+    """Resolve path inside VIDEOS_DIR; ValueError/FileNotFoundError otherwise.
+
+    The root itself is refused: "", "." or "a/.." resolve to it, and a delete or
+    rename of it would take the whole library.
+    """
     base = VIDEOS_DIR.resolve()
     target = (base / rel_path).resolve()
-    if not target.is_relative_to(base):
+    if target == base or not target.is_relative_to(base):
         raise ValueError("Invalid path")
     if not target.exists():
         raise FileNotFoundError("Not found")
     return target
+
+
+def _safe_path(rel_path: str) -> Path:
+    """_safe_path_strict, as HTTP errors."""
+    try:
+        return _safe_path_strict(rel_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 def _read_data() -> dict:
@@ -333,7 +336,7 @@ def _batch_move_sync(paths: list[str], dest_dir_path: str) -> list[dict]:
     for p in paths:
         try:
             source = (base / p).resolve()
-            if not source.is_relative_to(base) or not source.exists():
+            if source == base or not source.is_relative_to(base) or not source.exists():
                 results.append({"path": p, "ok": False, "error": "File non trovato"})
                 continue
             if not dest_dir.is_relative_to(base) and dest_dir != base:

@@ -221,3 +221,21 @@ def test_a_running_job_outside_the_download_phase_cannot_be_paused():
     finally:
         gate.set()
         jm._executor.shutdown(wait=False)
+
+
+def test_waiting_for_a_slot_after_a_resume_is_not_a_stall():
+    from app.progress import WebProgressBar
+    bar = WebProgressBar(10, None, None)
+    bar.pause_event = threading.Event()
+    assert not bar.paused
+    bar.yielded = lambda: True  # resumed, still waiting for its slot
+    assert bar.paused
+
+
+def test_the_pool_covers_a_full_batch():
+    from app.routers.downloads import MAX_BATCH_JOBS
+    jm = JobManager()
+    try:
+        assert jm._executor._max_workers >= MAX_BATCH_JOBS
+    finally:
+        jm._executor.shutdown(wait=False)
