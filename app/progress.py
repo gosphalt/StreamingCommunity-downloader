@@ -58,6 +58,10 @@ class WebProgressBar:
         # thread, so a pause lands at the next segment boundary; the in-flight
         # requests finish first. Cancel clears it so a paused job can be stopped.
         self.pause_event: Optional[threading.Event] = None
+        # Called by a segment thread that finds the pause set; returns on resume.
+        # Hands the download slot back meanwhile (app.jobs.JobManager._hold).
+        self.on_pause: Optional[Callable[[], None]] = None
+        self.closed = False
 
     def _speed_and_eta(self) -> tuple[float, Optional[float], float]:
         now = time.monotonic()
@@ -142,8 +146,8 @@ class WebProgressBar:
         return self.pause_event is not None and self.pause_event.is_set()
 
     def update(self, n=1, bytes=0):
-        while self.paused:
-            time.sleep(0.25)
+        if self.paused and self.on_pause:
+            self.on_pause()
         with self._lock:
             self.n += n
             self._bytes += bytes
@@ -167,7 +171,7 @@ class WebProgressBar:
             self._on_event(msg)
 
     def close(self):
-        pass
+        self.closed = True
 
     def refresh(self):
         pass

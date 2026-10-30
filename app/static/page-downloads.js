@@ -250,7 +250,9 @@ function _priorityOptions(current) {
 }
 
 function _controlsHtml(j) {
-  const pause = j.paused
+  // Pause holds only while segments are downloading; FFmpeg cannot be suspended.
+  const ffmpeg = j.status === 'running' && ['joining', 'merging'].includes(_jobPhases[j.job_id]);
+  const pause = ffmpeg ? '' : j.paused
     ? `<button class="btn btn-sm btn-outline-success ms-1" data-action="jobs:resume" data-job="${j.job_id}" title="Riprendi"><i class="ti ti-player-play"></i></button>`
     : `<button class="btn btn-sm btn-outline-secondary ms-1" data-action="jobs:pause" data-job="${j.job_id}" title="Metti in pausa"><i class="ti ti-player-pause"></i></button>`;
   const prio = `<select class="form-select form-select-sm ms-1 w-auto" data-change="jobs:priority" data-job="${j.job_id}" title="Priorità">${_priorityOptions(j.priority || 0)}</select>`;

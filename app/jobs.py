@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import threading
+import time
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -63,6 +64,12 @@ class DownloadJob:
     pause_event: threading.Event = field(default_factory=threading.Event)
     # Higher goes first when a slot frees up, whatever batch the job is in.
     priority: int = 0
+    # The open segment bar, if any: pausing is only possible while one is open,
+    # because FFmpeg (join, merge) cannot be suspended.
+    bar: Optional[object] = field(default=None, repr=False)
+    # True while a paused download has handed its slot back.
+    slot_yielded: bool = False
+    gate: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # Set when this job is one episode of a season or series asked for in one go,
     # so the notification can be a single summary instead of one per episode.
@@ -371,6 +378,8 @@ class JobManager:
             # Carry what the earlier phases already downloaded, so the readout
             # climbs across the whole job instead of restarting at each one.
             bar.pause_event = job.pause_event
+            bar.on_pause = lambda: manager._hold(job)
+            job.bar = bar
             bar.prior_bytes = bars[-1].bytes_done if bars else 0
             bars.append(bar)
             return bar
@@ -482,10 +491,35 @@ class JobManager:
             self._notify_listeners(job)
         return True
 
+    def _hold(self, job: DownloadJob) -> None:
+        """Called by a segment thread that found its job paused. The first one
+        returns the slot, so the next waiting job can start; everyone waits for
+        the resume, and the first back in takes a slot again before any fetches."""
+        with job.gate:
+            if job.pause_event.is_set() and not job.slot_yielded:
+                job.slot_yielded = True
+                job.status = "queued"
+                self._slots.release()
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
+        while job.pause_event.is_set():
+            time.sleep(0.25)
+        with job.gate:
+            if job.slot_yielded:
+                # False means cancelled while waiting: the main loop sees
+                # cancel_event itself, and _attempt must not release a slot it
+                # no longer holds, so slot_yielded stays set.
+                if self._slots.acquire(job, on_queued=self._announce_queued):
+                    job.slot_yielded = False
+                    job.status = "running"
+                    self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
+
     def set_paused(self, job_id: str, paused: bool) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
             if not job or job.status not in ("scheduled", "queued", "running"):
+                return False
+            # Running means FFmpeg may be at work, which cannot be paused.
+            if paused and job.status == "running" and (job.bar is None or job.bar.closed):
                 return False
             (job.pause_event.set if paused else job.pause_event.clear)()
         self._slots.wake()
@@ -648,7 +682,9 @@ class JobManager:
                     shutil.rmtree(tmp_path, ignore_errors=True)
                     logger.info("Cleaned up temp dir: %s", tmp_path)
         finally:
-            self._slots.release()
+            if not job.slot_yielded:
+                self._slots.release()
+            job.slot_yielded = False
         return False
 
     def _announce_queued(self, job: DownloadJob) -> None:

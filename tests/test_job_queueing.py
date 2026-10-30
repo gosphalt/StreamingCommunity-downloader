@@ -166,3 +166,58 @@ def test_higher_priority_jumps_the_line_and_paused_is_skipped():
     finally:
         gate.set()
         jm._executor.shutdown(wait=False)
+
+
+def test_pausing_a_running_download_hands_its_slot_to_the_next():
+    jm = JobManager()
+    jm.update_max_concurrent(1)
+    ran, finish = [], threading.Event()
+
+    class Bar:  # what WebProgressBar offers the download loop
+        closed = False
+        def __init__(self, job):
+            self.pause_event, self.on_pause = job.pause_event, lambda: jm._hold(job)
+        @property
+        def paused(self):
+            return self.pause_event.is_set()
+        def update(self):
+            if self.paused:
+                self.on_pause()
+
+    first, second = jm._make_job("first", "film"), jm._make_job("second", "film")
+
+    def first_download(*a, **k):
+        first.bar = bar = Bar(first)
+        while not finish.is_set():
+            bar.update()
+            time.sleep(0.02)
+        ran.append("first")
+
+    try:
+        jm._submit_job(first, first_download)
+        assert _wait_for(lambda: first.status == "running" and first.bar)
+        jm._submit_job(second, lambda *a, **k: ran.append("second"))
+        time.sleep(0.1)
+        assert second.status == "queued"
+        assert jm.set_paused(first.job_id, True)
+        assert _wait_for(lambda: ran == ["second"]), "the paused download kept its slot"
+        jm.set_paused(first.job_id, False)
+        assert _wait_for(lambda: first.status == "running")
+        finish.set()
+        assert _wait_for(lambda: ran == ["second", "first"] and first.status == "done")
+    finally:
+        finish.set()
+        jm._executor.shutdown(wait=False)
+
+
+def test_a_running_job_outside_the_download_phase_cannot_be_paused():
+    jm = JobManager()
+    gate = threading.Event()
+    job = jm._make_job("joining", "film")
+    try:
+        jm._submit_job(job, lambda *a, **k: gate.wait(2))
+        assert _wait_for(lambda: job.status == "running")
+        assert not jm.set_paused(job.job_id, True)
+    finally:
+        gate.set()
+        jm._executor.shutdown(wait=False)
