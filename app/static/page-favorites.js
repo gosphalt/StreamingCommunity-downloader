@@ -91,7 +91,7 @@ function renderFavorites() {
       ? (f.poster.startsWith('http') ? f.poster : `/api/image/${f.poster}`) : '';
     const kind = kindBadge({ type: f.kind, media_type: f.anime_type });
     return `<div class="col-6 col-sm-4 col-md-3 col-lg-2">
-      <div class="result-card" data-action="fav:open" data-i="${i}">
+      <a class="result-card" href="${escapeHtml(titleHash({ type: f.kind, id: f.external_id, slug: f.slug }))}" data-action="fav:open" data-i="${i}">
         <div class="poster-wrap">
           ${poster ? `<img src="${poster}" alt="" loading="lazy" onerror="posterError(this)">` : ''}
           <div class="poster-noimg" style="${poster ? 'display:none' : ''}">&#127916;</div>
@@ -105,7 +105,7 @@ function renderFavorites() {
             ${f.year ? `<span style="font-size:10px;color:var(--text-muted)">${escapeHtml(f.year)}</span>` : ''}
           </div>
         </div>
-      </div>
+      </a>
     </div>`;
   }).join('');
 }

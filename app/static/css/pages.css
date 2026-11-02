@@ -258,6 +258,7 @@
     /* ═══════════════════════════════════════════════════════
        RESULT CARDS
        ═══════════════════════════════════════════════════════ */
+    a.result-card, a.result-card:hover { color: inherit; text-decoration: none; }
     .result-card {
       cursor: pointer;
       border-radius: var(--radius) !important;

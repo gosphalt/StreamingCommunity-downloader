@@ -17,8 +17,8 @@ from app.progress import DownloadCancelledError, WebProgressBar
 
 def _get_library_path(type_: str) -> str:
     """Return the configured library path for content type, or VIDEOS_DIR as fallback."""
-    from app.routers.domain import _read_data
-    for lib in _read_data().get("libraries", []):
+    from app.config import read_data
+    for lib in read_data().get("libraries", []):
         if lib.get("type") == type_:
             return lib["path"]
     return str(VIDEOS_DIR)

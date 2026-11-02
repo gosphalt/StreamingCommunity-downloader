@@ -181,6 +181,8 @@ function closeMobileMenu() {
 // the default and then correcting itself.
 function showPage(page, params = null) {
   closeMobileMenu();
+  // Remember where each page was scrolled, so Back from a title lands there.
+  if (_routePage) _scrollAt[_routePage] = window.scrollY;
   if (params) PAGE_HASH[page]?.apply?.(params);
   ['search','downloads','files','requests','my-requests','watches','favorites','users','detail','settings'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
@@ -213,7 +215,10 @@ function showPage(page, params = null) {
   // replaceState, never location.hash: assigning fires hashchange and would
   // route straight back into here.
   syncHash(page);
+  const y = _scrollAt[page] || 0;
+  requestAnimationFrame(() => window.scrollTo(0, y));
 }
+const _scrollAt = {};
 
 // ── Spazio disco, nella sidebar ──────────────────────────────────────────────
 

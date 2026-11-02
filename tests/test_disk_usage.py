@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from app import config
 from app.auth.permissions import ALL_PERMISSIONS, Permission
 from app.routers import files
 from tests.conftest import do_setup, make_user, session_for
@@ -36,7 +37,7 @@ def libraries(tmp_path, monkeypatch):
             {"type": "anime", "path": str(tmp_path / "missing")},
         ],
     }))
-    monkeypatch.setattr(files, "DATA_FILE", data_file)
+    monkeypatch.setattr(config, "DATA_FILE", data_file)
     return films, series
 
 
@@ -81,7 +82,7 @@ def test_it_falls_back_to_the_videos_dir_with_no_libraries(
     do_setup(client, admin_credentials)
     data_file = tmp_path / "empty.json"
     data_file.write_text(json.dumps({"domain": "example.test"}))
-    monkeypatch.setattr(files, "DATA_FILE", data_file)
+    monkeypatch.setattr(config, "DATA_FILE", data_file)
     monkeypatch.setattr(files, "VIDEOS_DIR", tmp_path)
     _viewer(client)
 

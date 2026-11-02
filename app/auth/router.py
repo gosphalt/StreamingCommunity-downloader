@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app import __version__, db
-from app.auth import models, ratelimit, session as sessions
+from app.auth import models, ratelimit, session as sessions, setup_code
 from app.auth.deps import client_ip, current_user, require
 from app.auth.jellyfin import (
     TOKEN_CHECK_DEVICE_ID,
@@ -40,7 +40,12 @@ def _enforce_rate_limit(ip: str | None, username: str):
         )
 
 
+class SkipRequest(BaseModel):
+    code: str = ""
+
+
 class SetupRequest(BaseModel):
+    code: str = ""
     url: str = Field(min_length=1)
     username: str = Field(min_length=1)
     password: str = ""
@@ -179,6 +184,8 @@ async def setup(body: SetupRequest, request: Request, response: Response):
     """
     if models.setup_done():
         raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+    if not setup_code.verify(body.code):
+        raise HTTPException(status_code=403, detail="Codice di configurazione errato: lo trovi nel log del pannello")
 
     try:
         base_url = normalize_base_url(body.url)
@@ -222,7 +229,7 @@ async def setup(body: SetupRequest, request: Request, response: Response):
 
 
 @router.post("/skip")
-async def skip_setup():
+async def skip_setup(body: SkipRequest = SkipRequest()):
     """First-run alternative to /setup: run the panel without Jellyfin at all.
 
     The panel then runs with no login at all, which is the mode it had before
@@ -232,6 +239,8 @@ async def skip_setup():
     """
     if models.setup_done():
         raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+    if not setup_code.verify(body.code):
+        raise HTTPException(status_code=403, detail="Codice di configurazione errato: lo trovi nel log del pannello")
 
     with db.tx() as conn:
         # Same race guard as /setup: two concurrent first-run choices must not

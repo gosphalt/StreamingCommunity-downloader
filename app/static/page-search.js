@@ -311,7 +311,7 @@ function renderResultCards(items, container, baseIndex,
       ? ''
       : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
     card.innerHTML = `
-      <div class="result-card" data-action="search:open" data-idx="${idx}">
+      <a class="result-card" href="${escapeHtml(titleHash(item))}" data-action="search:open" data-idx="${idx}">
         <div class="poster-wrap">
           ${posterHtml}
           <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
@@ -328,7 +328,7 @@ function renderResultCards(items, container, baseIndex,
             ${year?`<span style="font-size:10px;color:var(--text-muted)">${year}</span>`:''}
           </div>
         </div>
-      </div>`;
+      </a>`;
     container.appendChild(card);
   });
   paintFavorites();

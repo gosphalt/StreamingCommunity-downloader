@@ -74,6 +74,10 @@ def record_failure(ip: str | None, username: str) -> float:
         count, _ = _failures.get(key, (0, 0.0))
         count += 1
         _failures[key] = (count, now)
+        # Swept here, on the write path: stale keys were only dropped when the same
+        # key came back, so rotating usernames grew the table forever.
+        for k in [k for k, (_, at) in _failures.items() if now - at > FORGET_AFTER]:
+            del _failures[k]
     delay = _delay_for(count)
     if delay:
         logger.warning(

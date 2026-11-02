@@ -6,14 +6,13 @@ is re-checked here, against the *current* configuration — never against values
 the client sent or values frozen at request time.
 """
 
-import json
 import logging
 import os
 import re
 from dataclasses import dataclass
 from typing import Callable
 
-from app.config import DATA_FILE, VIDEOS_DIR
+from app.config import VIDEOS_DIR, read_data
 from app.core import animeunity, container, naming, paths, probe
 from app.requests import models
 
@@ -54,14 +53,6 @@ class NotConfigured(ResolutionError):
 
 # ── Server-side configuration ──────────────────────────────────────────────────
 
-def _read_data() -> dict:
-    try:
-        with open(DATA_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
 def current_domain() -> str:
     """The configured source domain.
 
@@ -69,14 +60,14 @@ def current_domain() -> str:
     able to point the panel at an arbitrary host, and a domain saved with a
     request would be stale by the time it is approved.
     """
-    domain = (_read_data().get("domain") or "").strip()
+    domain = (read_data().get("domain") or "").strip()
     if not domain:
         raise NotConfigured("Nessun dominio configurato nelle impostazioni")
     return domain
 
 
 def library_dir(media_type: str) -> str:
-    for library in _read_data().get("libraries", []):
+    for library in read_data().get("libraries", []):
         if library.get("type") == LIBRARY_TYPES.get(media_type):
             return library["path"]
     return str(VIDEOS_DIR)

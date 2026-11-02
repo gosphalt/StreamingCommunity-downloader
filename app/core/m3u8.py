@@ -547,11 +547,14 @@ class M3U8_Segments:
 
     def _write_ts(self, index, content):
         ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
-        with open(ts_filename, "wb") as ts_file:
-            if self.key and self.decryption.iv:
-                ts_file.write(self.decryption.decrypt_ts(content))
-            else:
-                ts_file.write(content)
+        # Decrypt first and rename into place last: a failed decrypt or a full
+        # disk used to leave a short "N.ts" that every later check (resume,
+        # _missing_segments) counted as a good segment.
+        data = self.decryption.decrypt_ts(content) if self.key and self.decryption.iv else content
+        part = ts_filename + ".part"
+        with open(part, "wb") as ts_file:
+            ts_file.write(data)
+        os.replace(part, ts_filename)
 
     def _record_success(self):
         """One segment obtained. Breaks the failure run: the source is serving."""

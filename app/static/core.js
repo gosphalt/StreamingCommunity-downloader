@@ -319,6 +319,8 @@ const _KEEPS_ITS_DEFAULT = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'LA
 function _dispatchAction(event, attribute) {
   const el = event.target.closest(`[${attribute}]`);
   if (!el || el.disabled) return;
+  // Ctrl/Cmd/Shift-click on a real link: let the browser open it in a new tab.
+  if (event.type === 'click' && el.tagName === 'A' && (event.ctrlKey || event.metaKey || event.shiftKey)) return;
   const handler = _ACTIONS[el.getAttribute(attribute)];
   if (!handler) return;
   // Only swallow the event once something is actually going to handle it: an

@@ -139,3 +139,29 @@ def test_destination_paths_stay_inside_the_library():
 
 def test_long_titles_are_truncated_to_a_usable_length():
     assert len(sanitize_filename("A" * 500)) <= 180
+
+
+class _Resp:
+    ok, status_code, url = True, 200, "u"
+
+    def __init__(self, ctype, body):
+        self.headers = {"content-type": ctype}
+        self.raw = type("R", (), {"read": lambda s, n, decode_content=True: body[:n]})()
+
+    def close(self):
+        pass
+
+
+def test_image_proxy_refuses_svg_and_oversize(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    from app.routers import images
+    monkeypatch.setattr(images.requests, "get", lambda *a, **k: _Resp("image/svg+xml", b"<svg/>"))
+    with pytest.raises(HTTPException):
+        images._fetch_image("example.com", "a.svg")
+    monkeypatch.setattr(images, "MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(images.requests, "get", lambda *a, **k: _Resp("image/jpeg", b"12345"))
+    with pytest.raises(HTTPException):
+        images._fetch_image("example.com", "a.jpg")
+    monkeypatch.setattr(images.requests, "get", lambda *a, **k: _Resp("image/jpeg", b"123"))
+    assert images._fetch_image("example.com", "a.jpg") == (b"123", "image/jpeg")

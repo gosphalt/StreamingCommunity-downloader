@@ -161,3 +161,10 @@ def test_setup_is_also_rate_limited(client, jellyfin):
         json={"url": "http://jellyfin.local:8096", "username": "admin", "password": "wrong"},
     )
     assert response.status_code == 429
+
+
+def test_stale_keys_are_swept_on_the_next_failure(monkeypatch):
+    ratelimit._failures[("1.1.1.1", "old")] = (1, 0.0)  # monotonic 0: long ago
+    monkeypatch.setattr(ratelimit.time, "monotonic", lambda: ratelimit.FORGET_AFTER + 10)
+    ratelimit.record_failure("2.2.2.2", "new")
+    assert list(ratelimit._failures) == [("2.2.2.2", "new")]

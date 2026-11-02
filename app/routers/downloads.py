@@ -61,20 +61,20 @@ class FilmDownloadRequest(BaseModel):
     id: int
     title: str
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
 
 
 class EpisodeDownloadRequest(BaseModel):
     tv_id: int
-    eps: list[dict]
+    eps: list[dict] = Field(max_length=MAX_BATCH_JOBS)
     ep_index: int
     token: str
     tv_name: str
     season: int
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
 
 
 class EpisodeInfo(BaseModel):
@@ -88,8 +88,8 @@ class AnimeDownloadRequest(BaseModel):
     anime_name: str
     anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
 
 
 class SeasonDownloadRequest(BaseModel):
@@ -104,8 +104,8 @@ class SeasonDownloadRequest(BaseModel):
     tv_name: str
     season: int
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
     scheduled_at: datetime | None = None
     # Skip episodes whose file is already in the library (#30).
     only_missing: bool = False
@@ -116,8 +116,8 @@ class SeriesDownloadRequest(BaseModel):
     slug: str
     tv_name: str
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
     scheduled_at: datetime | None = None
     # Skip episodes whose file is already in the library (#30).
     only_missing: bool = False
@@ -128,8 +128,8 @@ class AnimeAllDownloadRequest(BaseModel):
     anime_name: str
     anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
-    audio_languages: list[str] = ["ita"]
-    subtitle_languages: list[str] = ["ita", "eng"]
+    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
     scheduled_at: datetime | None = None
     # Skip episodes whose file is already in the library (#30).
     only_missing: bool = False

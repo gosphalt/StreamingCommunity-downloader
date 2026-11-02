@@ -155,6 +155,14 @@ def get_settings() -> dict:
         return dict(SETTINGS_DEFAULTS)
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Replace ``path`` in one step: an unlocked reader, or a crash mid-write,
+    sees the old file or the new one, never an empty or cut-short one."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def update_data(changes: dict):
     """Apply top-level changes to data.json under the shared lock.
 
@@ -174,8 +182,7 @@ def update_data(changes: dict):
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
         data.update(changes)
-        with open(DATA_FILE, "w") as f:
-            json.dump(data, f)
+        atomic_write_text(DATA_FILE, json.dumps(data))
 
 
 def save_settings(new_settings: dict):

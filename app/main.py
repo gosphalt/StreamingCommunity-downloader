@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
 import logging
+import shutil
+import uuid
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +17,7 @@ from app import __version__, config, db, downloads_hooks, downloads_notify, libr
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
+from app.auth import setup_code
 from app.auth import users_router
 from app.auth.deps import AuthMiddleware
 from app.core import domain_recovery
@@ -106,12 +109,39 @@ def check_writable_paths() -> None:
     )
 
 
+def purge_orphan_temp_dirs() -> int:
+    """Delete job folders a crash or power cut left in TMP_DIR.
+
+    Job state lives in memory, so after a restart no job can claim them and
+    their segments (gigabytes each) would stay forever. Only folders named like
+    a job id (a uuid) are touched: TMP_DIR is configurable and may be shared.
+    """
+    removed = 0
+    try:
+        entries = list(config.TMP_DIR.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            uuid.UUID(entry.name)
+        except ValueError:
+            continue
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+    if removed:
+        logger.info("Removed %d orphaned download folder(s) from %s", removed, config.TMP_DIR)
+    return removed
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # First: a database the process cannot write fails migrations with SQLite's
     # "unable to open database file", which names neither the path nor the uid.
     check_writable_paths()
+    purge_orphan_temp_dirs()
     db.run_migrations()
+    setup_code.issue()
     auth_session.purge_expired()
     requests_service.register_job_listener()
     # Second listener, registered after the request one so a request's own row is

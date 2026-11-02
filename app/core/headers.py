@@ -18,8 +18,12 @@ def sanitize_filename(name: str) -> str:
     return cleaned[:180]
 
 
+_ROTATOR = UserAgent(
+    software_names=[SoftwareName.CHROME.value],
+    operating_systems=[OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value],
+    limit=10,
+)
+
+
 def get_headers():
-    software_names = [SoftwareName.CHROME.value]
-    operating_systems = [OperatingSystem.WINDOWS.value, OperatingSystem.LINUX.value]
-    user_agent_rotator = UserAgent(software_names=software_names, operating_systems=operating_systems, limit=10)
-    return user_agent_rotator.get_random_user_agent()
+    return _ROTATOR.get_random_user_agent()

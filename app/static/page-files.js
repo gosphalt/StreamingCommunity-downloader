@@ -114,7 +114,8 @@ function setupFileManager() {
       const path = toggle.dataset.folderPath;
       if (_expandedFolders.has(path)) _expandedFolders.delete(path);
       else _expandedFolders.add(path);
-      if (_cachedTree) renderFileTree(_cachedTree);
+      if (!_cachedTree) return;
+      loadOpenFolders(_cachedTree).catch(() => {}).then(() => renderFileTree(_cachedTree));
       return;
     }
     const renameBtn = e.target.closest('[data-rename-path]');
@@ -276,6 +277,16 @@ function renderSearchResults(results, query) {
   syncSelectionUI();
 }
 
+// The server lists one folder per request. Fetch the contents of every folder
+// that is open and not loaded yet, level by level, so a reload keeps them open.
+async function loadOpenFolders(items) {
+  const open = items.filter(i => i.type === 'directory' && !i.empty && _expandedFolders.has(i.path));
+  await Promise.all(open.map(async item => {
+    if (!item.children) item.children = await api.get('/api/files?path=' + encodeURIComponent(item.path));
+    await loadOpenFolders(item.children);
+  }));
+}
+
 async function loadFiles() {
   const pane = document.getElementById('files-left-pane');
   if (!pane) return;
@@ -295,6 +306,7 @@ async function loadFiles() {
   }
   try {
     const tree = await api.get('/api/files');
+    await loadOpenFolders(tree);
     _cachedTree = tree;
     if (!tree||!tree.length) { pane.innerHTML='<div class="text-muted text-center py-4">Nessun file trovato</div>'; return; }
     renderFileTree(tree);

@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from typing import Literal
 
@@ -26,17 +25,6 @@ CAN_READ_DOMAIN = [
 ]
 
 
-def _read_data() -> dict:
-    # config.DATA_FILE is resolved at call time, not bound at import: the tests
-    # point it at a temp file, and a stale binding here would have this module
-    # reading one file while app.config.save_settings wrote another.
-    try:
-        with open(config.DATA_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"domain": ""}
-
-
 _update_data = config.update_data
 
 
@@ -46,7 +34,7 @@ class DomainUpdate(BaseModel):
 
 @router.get("", dependencies=CAN_READ_DOMAIN)
 async def get_domain():
-    data = _read_data()
+    data = config.read_data()
     domain = data.get("domain", "")
     version = None
     valid = False
@@ -122,7 +110,7 @@ class HostsUpdate(BaseModel):
 
 
 def _hosts_state() -> dict:
-    data = _read_data()
+    data = config.read_data()
     return {
         "animeunity": config.configured_animeunity_host(),
         "animeunity_saved": (data.get("animeunity_domain") or "").strip(),
@@ -183,7 +171,7 @@ class LibrariesUpdate(BaseModel):
 
 @router.get("/libraries", dependencies=CAN_MANAGE)
 def get_libraries():
-    data = _read_data()
+    data = config.read_data()
     return {
         "libraries": data.get("libraries", []),
         "excluded_folders": data.get("excluded_folders", []),

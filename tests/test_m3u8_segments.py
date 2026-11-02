@@ -383,3 +383,17 @@ def test_a_clean_download_writes_every_segment(tmp_path, segment_server, no_slee
 
     assert seg._missing_segments() == []
     assert sorted(os.listdir(seg.temp_folder)) == [f"{i}.ts" for i in range(5)]
+
+
+def test_a_failed_decrypt_leaves_no_segment_behind(tmp_path):
+    """A half-written N.ts used to count as a present segment."""
+    import os
+    seg = _segments(tmp_path)
+    os.makedirs(seg.temp_folder, exist_ok=True)
+    seg.key = b"k" * 16
+    seg.decryption = type("D", (), {"iv": b"i", "decrypt_ts": lambda s, c: (_ for _ in ()).throw(ValueError("bad padding"))})()
+    try:
+        seg._write_ts(0, b"junk")
+    except ValueError:
+        pass
+    assert 0 in seg._missing_segments()

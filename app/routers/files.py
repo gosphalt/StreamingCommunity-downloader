@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -12,7 +11,7 @@ from pydantic import BaseModel
 
 from app.auth.deps import require
 from app.auth.permissions import Permission
-from app.config import VIDEOS_DIR, DATA_FILE
+from app.config import VIDEOS_DIR, read_data
 from app.core import container
 
 logger = logging.getLogger(__name__)
@@ -24,8 +23,11 @@ CAN_VIEW = [Depends(require(Permission.VIEW_LIBRARY))]
 CAN_MANAGE = [Depends(require(Permission.MANAGE_FILES))]
 
 
-def _safe_path_strict(rel_path: str) -> Path:
+def _safe_path_strict(rel_path: str, keep_link: bool = False) -> Path:
     """Resolve path inside VIDEOS_DIR; ValueError/FileNotFoundError otherwise.
+
+    ``keep_link`` is for delete, rename and move: a symlink there is the thing
+    acted on, not the folder it points to. Serving files still follows it.
 
     The root itself is refused: "", "." or "a/.." resolve to it, and a delete or
     rename of it would take the whole library.
@@ -36,25 +38,21 @@ def _safe_path_strict(rel_path: str) -> Path:
         raise ValueError("Invalid path")
     if not target.exists():
         raise FileNotFoundError("Not found")
+    if keep_link:
+        raw = Path(os.path.normpath(base / rel_path))
+        if raw.is_symlink() and raw.is_relative_to(base):
+            return raw
     return target
 
 
-def _safe_path(rel_path: str) -> Path:
+def _safe_path(rel_path: str, keep_link: bool = False) -> Path:
     """_safe_path_strict, as HTTP errors."""
     try:
-        return _safe_path_strict(rel_path)
+        return _safe_path_strict(rel_path, keep_link)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid path")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
-
-
-def _read_data() -> dict:
-    try:
-        with open(DATA_FILE) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
 
 
 # ── Disk usage ─────────────────────────────────────────────────────────────────
@@ -68,7 +66,7 @@ _disk_usage_cache: dict = {"at": 0.0, "data": None}
 
 
 def _library_paths() -> list[str]:
-    paths = [lib["path"] for lib in _read_data().get("libraries", []) if lib.get("path")]
+    paths = [lib["path"] for lib in read_data().get("libraries", []) if lib.get("path")]
     return paths or [str(VIDEOS_DIR)]
 
 
@@ -104,20 +102,24 @@ async def get_disk_usage():
     return await asyncio.to_thread(_compute_disk_usage)
 
 
-def _build_tree(directory: Path, base: Path, excluded: set) -> list[dict]:
+def _list_dir(directory: Path, base: Path, excluded: set) -> list[dict]:
+    """One level only: a library of thousands of files is never walked whole.
+
+    A folder reports just whether it holds anything (``empty``); the page asks
+    for its contents when it is opened. A symlinked folder is listed, not entered.
+    """
     entries = []
     try:
         for item in sorted(directory.iterdir()):
             if item.name in excluded:
                 continue
             if item.is_dir():
-                children = _build_tree(item, base, excluded)
+                empty = item.is_symlink() or not any(c.name not in excluded for c in item.iterdir())
                 entries.append({
                     "name": item.name,
                     "type": "directory",
                     "path": str(item.relative_to(base)),
-                    "children": children,
-                    "empty": len(children) == 0,
+                    "empty": empty,
                 })
             elif item.is_file():
                 stat = item.stat()
@@ -152,6 +154,8 @@ def _build_library_tree(directory: Path, depth: int = 0, max_depth: int = 3) -> 
 
 
 _DEFAULT_EXCLUDED = {"images", "snippets", "lost+found"}
+
+
 _TYPE_LABELS = {"film": "Film", "tv": "Serie TV", "anime": "Anime"}
 
 
@@ -177,7 +181,8 @@ def _search_tree(directory: Path, base: Path, query: str, excluded: set) -> list
                         "size": stat.st_size,
                         "mtime": stat.st_mtime,
                     })
-            if item.is_dir():
+            # A symlinked folder is listed but not entered: a link back up loops forever.
+            if item.is_dir() and not item.is_symlink():
                 results.extend(_search_tree(item, base, query, excluded))
     except PermissionError:
         pass
@@ -190,21 +195,28 @@ async def search_files(q: str):
         raise HTTPException(status_code=400, detail="Query troppo corta (min 2 caratteri)")
     if not VIDEOS_DIR.exists():
         return []
-    excluded = _DEFAULT_EXCLUDED | set(_read_data().get("excluded_folders", []))
+    excluded = _DEFAULT_EXCLUDED | set(read_data().get("excluded_folders", []))
     return await asyncio.to_thread(_search_tree, VIDEOS_DIR, VIDEOS_DIR, q.strip().lower(), excluded)
 
 
 @router.get("", dependencies=CAN_VIEW)
-async def list_files():
+async def list_files(path: str = ""):
+    """The contents of one folder of the library (the root when ``path`` is empty)."""
     if not VIDEOS_DIR.exists():
         return []
-    excluded = _DEFAULT_EXCLUDED | set(_read_data().get("excluded_folders", []))
-    return await asyncio.to_thread(_build_tree, VIDEOS_DIR, VIDEOS_DIR, excluded)
+    base = VIDEOS_DIR.resolve()
+    directory = (base / path).resolve()
+    if not directory.is_relative_to(base):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="File not found")
+    excluded = _DEFAULT_EXCLUDED | set(read_data().get("excluded_folders", []))
+    return await asyncio.to_thread(_list_dir, directory, base, excluded)
 
 
 @router.get("/library-tree", dependencies=CAN_VIEW)
 async def list_library_tree():
-    data = _read_data()
+    data = read_data()
     result = []
     for lib in data.get("libraries", []):
         lib_path = Path(lib["path"])
@@ -238,8 +250,7 @@ def download_file(file_path: str):
     return FileResponse(
         path=str(target),
         media_type=container.mime_for(target),
-        filename=target.name,
-        headers={"Content-Disposition": f'attachment; filename="{target.name}"'},
+        filename=target.name,  # Starlette writes the RFC 5987 form; a hand-made header is latin-1 only
     )
 
 
@@ -266,8 +277,8 @@ class RenameRequest(BaseModel):
 
 @router.post("/move", dependencies=CAN_MANAGE)
 async def move_to_library(body: MoveRequest):
-    data = _read_data()
-    source = _safe_path(body.path)
+    data = read_data()
+    source = _safe_path(body.path, keep_link=True)
 
     if body.dest_dir_path is not None:
         # Move within VIDEOS_DIR
@@ -316,7 +327,7 @@ async def move_to_library(body: MoveRequest):
 
 def _delete_sync(target: Path):
     """Synchronous delete helper (runs in thread)."""
-    if target.is_dir():
+    if target.is_dir() and not target.is_symlink():
         shutil.rmtree(target)
     else:
         target.unlink()
@@ -324,7 +335,7 @@ def _delete_sync(target: Path):
 
 @router.delete("/delete/{file_path:path}", status_code=204, dependencies=CAN_MANAGE)
 async def delete_path(file_path: str):
-    target = _safe_path(file_path)
+    target = _safe_path(file_path, keep_link=True)
     await asyncio.to_thread(_delete_sync, target)
 
 
@@ -371,7 +382,7 @@ def _batch_delete_sync(paths: list[str]) -> list[dict]:
     results = []
     for p in paths:
         try:
-            target = _safe_path_strict(p)
+            target = _safe_path_strict(p, keep_link=True)
             _delete_sync(target)
             results.append({"path": p, "ok": True})
         except (ValueError, FileNotFoundError) as e:
@@ -385,7 +396,7 @@ def _batch_delete_sync(paths: list[str]) -> list[dict]:
 async def rename_path(body: RenameRequest):
     if not body.new_name or '/' in body.new_name or '\\' in body.new_name or body.new_name in ('.', '..') or '\x00' in body.new_name:
         raise HTTPException(status_code=400, detail="Nome non valido")
-    source = _safe_path(body.path)
+    source = _safe_path(body.path, keep_link=True)
     dest = source.parent / body.new_name
     if dest.exists():
         raise HTTPException(status_code=409, detail=f"'{body.new_name}' esiste già")

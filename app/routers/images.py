@@ -30,6 +30,8 @@ router = APIRouter(
 
 # Poster filenames come from a third-party API and end up in a URL, so they are
 # constrained to what a filename can actually be.
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
 SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 
 
@@ -54,8 +56,16 @@ def _fetch_image(domain: str, filename: str) -> tuple[bytes, str]:
             content_type = res.headers.get("content-type", "")
             logger.info("Image proxy %s -> HTTP %d ct=%s final=%s",
                         url, res.status_code, content_type, res.url)
-            if res.ok and content_type.startswith("image/"):
-                return res.content, content_type
+            # SVG is script-capable and would run on the panel's own origin when
+            # opened directly; a poster is never one.
+            if res.ok and content_type.startswith("image/") and "svg" not in content_type:
+                body = res.raw.read(MAX_IMAGE_BYTES + 1, decode_content=True)
+                res.close()
+                if len(body) > MAX_IMAGE_BYTES:
+                    last_status = 502
+                    continue
+                return body, content_type
+            res.close()
             last_status = res.status_code
             logger.warning("Image proxy miss: %s -> HTTP %d ct=%r", url, res.status_code, content_type)
         except Exception as e:
@@ -79,4 +89,6 @@ async def proxy_image(filename: str):
 
     content, content_type = await asyncio.to_thread(_fetch_image, domain, filename)
     return Response(content=content, media_type=content_type,
-                    headers={"Cache-Control": "private, max-age=86400"})
+                    headers={"Cache-Control": "private, max-age=86400",
+                                     "X-Content-Type-Options": "nosniff",
+                                     "Content-Security-Policy": "default-src 'none'; sandbox"})

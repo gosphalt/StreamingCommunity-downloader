@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from app.config import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,10 +43,7 @@ class ScheduleStore:
     def _save(self):
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                json.dumps(self._entries, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            atomic_write_text(self._path, json.dumps(self._entries, ensure_ascii=False, indent=2))
         except Exception as e:
             logger.error("Could not save schedule file: %s", e)
 

@@ -77,6 +77,7 @@ $('setup-form').addEventListener('submit', async e => {
   busy(btn, true, 'Connessione...');
   try {
     await api.post('/api/auth/setup', {
+      code: $('setup-code').value.trim(),
       url: $('setup-url').value.trim(),
       username: $('setup-username').value.trim(),
       password: $('setup-password').value,
@@ -93,7 +94,7 @@ $('skip-setup-btn').addEventListener('click', async () => {
   const btn = $('skip-setup-btn');
   busy(btn, true, 'Attendere...');
   try {
-    await api.post('/api/auth/skip');
+    await api.post('/api/auth/skip', { code: $('setup-code').value.trim() });
     window.location.href = '/';
   } catch (e) {
     showAlert(errText(e, 'Operazione fallita.'));

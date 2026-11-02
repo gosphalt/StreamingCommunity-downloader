@@ -66,6 +66,15 @@ def _reset_ratelimit():
 
 
 @pytest.fixture(autouse=True)
+def _open_wizard(monkeypatch):
+    """The first-run wizard wants a code from the log; tests that are not about
+    that gate (tests/test_setup_code.py is) walk straight through it."""
+    from app.auth import setup_code
+
+    monkeypatch.setattr(setup_code, "verify", lambda presented: True)
+
+
+@pytest.fixture(autouse=True)
 def _no_auto_retry(monkeypatch):
     """A failing job is retried a minute later in production. Tests that fail a
     job on purpose want the failure, not three more calls and three minutes;
@@ -316,6 +325,7 @@ class InlineExecutor:
 @pytest.fixture
 def source(monkeypatch, tmp_path):
     """Fake external source plus a temporary library and configured domain."""
+    from app import config
     from app.core import animeunity, film, metadata, page, tv
     from app.requests import resolver, service
 
@@ -335,7 +345,7 @@ def source(monkeypatch, tmp_path):
         }),
         encoding="utf-8",
     )
-    monkeypatch.setattr(resolver, "DATA_FILE", data_file)
+    monkeypatch.setattr(config, "DATA_FILE", data_file)
     fake.library = library
 
     monkeypatch.setattr(film, "get_film_languages", lambda *a, **k: fake.languages)
