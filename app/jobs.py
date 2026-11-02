@@ -154,11 +154,47 @@ class DownloadSlots:
         self._line: deque = deque()
         self._tickets = 0
 
+    @staticmethod
+    def _order_key(j: "DownloadJob"):
+        # Higher priority first, then the lower ticket. Tickets are reassigned by move(),
+        # so the deque's own order is no longer the queue order.
+        return (j.priority, -j.queue_seq)
+
     def _next(self) -> Optional["DownloadJob"]:
         """The job that gets the next free slot. Caller holds the lock."""
         ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
-        # min on (-priority, ticket): deque order is ticket order, so max() keeps the first.
-        return max(ready, key=lambda j: j.priority, default=None)
+        return max(ready, key=self._order_key, default=None)
+
+    def move(self, job: "DownloadJob", where: str) -> list:
+        """Move a waiting job to the top, one place up or down, or the bottom.
+
+        The job takes the priority of the neighbour it lands beside, so the line
+        stays ordered by priority: moving past a "Bassa" job makes it "Bassa" too.
+        Tickets are reused in their existing order, so no two jobs share one.
+        Returns the jobs whose ticket or priority changed.
+        """
+        with self._cond:
+            line = sorted(self._line, key=self._order_key, reverse=True)
+            if job not in line:
+                return []
+            i = line.index(job)
+            rest = line[:i] + line[i + 1:]
+            p = {"top": 0, "up": max(i - 1, 0), "down": min(i + 1, len(rest)), "bottom": len(rest)}[where]
+            if p == i:
+                return []
+            prev = rest[p - 1] if p > 0 else None
+            nxt = rest[p] if p < len(rest) else None
+            old_priority = job.priority
+            job.priority = (prev or nxt).priority
+            new_order = rest[:p] + [job] + rest[p:]
+            changed = [job] if job.priority != old_priority else []
+            for seq, j in zip(sorted(x.queue_seq for x in line), new_order):
+                if j.queue_seq != seq:
+                    j.queue_seq = seq
+                    if j not in changed:
+                        changed.append(j)
+            self._cond.notify_all()
+            return changed
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
         """Wait for a slot. False when the job was cancelled while waiting."""
@@ -540,6 +576,22 @@ class JobManager:
         self._slots.wake()
         self._broadcast({"type": "job_flags", "job_id": job_id,
                          "paused": job.pause_event.is_set(), "priority": priority})
+        return True
+
+    def move_in_queue(self, job_id: str, where: str) -> bool:
+        """Move a job waiting for a slot; see DownloadSlots.move."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status != "queued":
+                return False
+        changed = self._slots.move(job, where)
+        if not changed:
+            return False
+        self._slots.wake()
+        for j in changed:
+            self._broadcast({"type": "job_queued", "job_id": j.job_id, "queue_seq": j.queue_seq})
+        self._broadcast({"type": "job_flags", "job_id": job_id,
+                         "paused": job.pause_event.is_set(), "priority": job.priority})
         return True
 
     def dismiss(self, job_id: str) -> bool:

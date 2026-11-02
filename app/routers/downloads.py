@@ -443,6 +443,18 @@ def fire_now(job_id: str):
     raise HTTPException(status_code=404, detail="Job non trovato o non in stato programmato")
 
 
+class MoveRequest(BaseModel):
+    to: Literal["top", "up", "down", "bottom"]
+
+
+@router.post("/{job_id}/move", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def move_in_queue(job_id: str, body: MoveRequest):
+    """Move a download waiting for a slot. A job already at that edge is not an error."""
+    if not job_manager.move_in_queue(job_id, body.to):
+        raise HTTPException(status_code=409, detail="Il job non è in coda, o è già in quella posizione")
+    return {"job_id": job_id, "to": body.to}
+
+
 # Starts a download, so it takes what starting one takes — not the job-control
 # permission approvers hold for stopping what they approved.
 @router.post("/{job_id}/retry", status_code=202, dependencies=CAN_DOWNLOAD)

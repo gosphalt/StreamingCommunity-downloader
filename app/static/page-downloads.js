@@ -256,7 +256,16 @@ function _controlsHtml(j) {
     ? `<button class="btn btn-sm btn-outline-success ms-1" data-action="jobs:resume" data-job="${j.job_id}" title="Riprendi"><i class="ti ti-player-play"></i></button>`
     : `<button class="btn btn-sm btn-outline-secondary ms-1" data-action="jobs:pause" data-job="${j.job_id}" title="Metti in pausa"><i class="ti ti-player-pause"></i></button>`;
   const prio = `<select class="form-select form-select-sm ms-1 w-auto" data-change="jobs:priority" data-job="${j.job_id}" title="Priorità">${_priorityOptions(j.priority || 0)}</select>`;
-  return prio + pause;
+  return prio + _moveBtnsHtml(j) + pause;
+}
+
+// Only a job waiting for a slot has a place in the line to move within.
+function _moveBtnsHtml(j) {
+  if (j.status !== 'queued' || j.queue_seq == null) return '';
+  const btn = (to, icon, title) =>
+    `<button class="btn btn-sm btn-outline-secondary ms-1" data-action="jobs:move" data-job="${j.job_id}" data-to="${to}" title="${title}"><i class="ti ti-${icon}"></i></button>`;
+  return btn('top', 'chevrons-up', 'Porta in cima') + btn('up', 'arrow-up', 'Sposta su') +
+         btn('down', 'arrow-down', 'Sposta giù') + btn('bottom', 'chevrons-down', 'Porta in fondo');
 }
 
 function _stopBtnHtml(jobId) {
@@ -717,6 +726,12 @@ async function fireNow(jobId) {
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
+async function moveJob(jobId, to) {
+  try {
+    await api.post(`/api/download/${jobId}/move`, {to});
+  } catch(e) { showToast(errText(e), 'danger'); }
+}
+
 const _dlSelected = new Set();   // job ids ticked for a bulk action
 
 // The ticked jobs, or every unfinished one when nothing is ticked.
@@ -821,6 +836,7 @@ registerActions({
   'jobs:clear':       () => clearFinished(),
   'jobs:filter':      d => setDlFilter(d.filter),
   'jobs:fire':        d => fireNow(d.job),
+  'jobs:move':        d => moveJob(d.job, d.to),
   'jobs:cancel':      d => cancelJob(d.job),
   'jobs:pause':       d => bulkAction('pause', {}, [d.job]),
   'jobs:resume':      d => bulkAction('resume', {}, [d.job]),
