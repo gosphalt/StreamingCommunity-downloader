@@ -1,6 +1,5 @@
 """Data access for panel settings and users."""
 
-import json
 import logging
 import sqlite3
 from dataclasses import dataclass
@@ -226,7 +225,3 @@ def count_users_with(permission) -> int:
         (int(permission),),
     )
     return row["n"]
-
-
-def json_dumps(value) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

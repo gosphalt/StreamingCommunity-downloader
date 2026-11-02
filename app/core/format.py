@@ -199,11 +199,3 @@ def download_subtitle_tracks(parser, allowed_languages: list[str], output_dir: s
             logger.warning("Failed to download subtitle %s: %s", lang_code, e)
 
     return downloaded
-
-
-def get_audio_track_url(parser, language_name: str) -> str | None:
-    if parser.audio_ts:
-        for obj_audio in parser.audio_ts:
-            if obj_audio.get("name") == language_name:
-                return obj_audio.get("uri")
-    return None

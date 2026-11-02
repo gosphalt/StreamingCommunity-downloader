@@ -209,15 +209,6 @@ def count_by_status(*statuses: str) -> int:
     return row["n"]
 
 
-def find_open_by_key(key: str) -> Request | None:
-    placeholders = ",".join("?" * len(OPEN_STATUSES))
-    row = db.query_one(
-        f"SELECT * FROM jf_request WHERE content_key = ? AND status IN ({placeholders})",
-        (key, *OPEN_STATUSES),
-    )
-    return _row_to_request(row) if row else None
-
-
 def list_all(statuses: tuple[str, ...] | None = None) -> list[Request]:
     if statuses:
         placeholders = ",".join("?" * len(statuses))

@@ -537,3 +537,40 @@ def test_the_api_refuses_what_it_cannot_trust(client, admin, root, body):
                "folder": "Uno", **body}
     response = client.post("/api/library/associations", headers=admin, json=payload)
     assert response.status_code in (400, 422), response.text
+
+
+def test_two_missing_titles_with_the_same_anchor_size_are_not_guessed(root):
+    # Same size on both: the one folder that holds it could be either title's.
+    import shutil
+    for name, ext in (("Uno", "1"), ("Due", "2")):
+        _payload(root / name / "Season 01" / f"{name} S01E01.mkv", 777)
+        library.on_job_finished(_job(str(root / name / "Season 01" / f"{name} S01E01.mkv"),
+                                     external_id=ext, title=name, year=None))
+    os.rename(root / "Uno", root / "Nuova")
+    shutil.rmtree(root / "Due")
+
+    library.reconcile()
+
+    assert library.for_title("streamingcommunity", "episode", "1")[0].folder == "Uno"
+    assert library.for_title("streamingcommunity", "episode", "2")[0].folder == "Due"
+
+
+def test_a_folder_found_for_one_title_is_not_offered_to_another(root):
+    # Different sizes, but both anchors live in the one renamed folder: after the
+    # first title takes it, the second must not be filed there as well.
+    import shutil
+    _payload(root / "Uno" / "Season 01" / "a.mkv", 111)
+    library.on_job_finished(_job(str(root / "Uno" / "Season 01" / "a.mkv"),
+                                 external_id="1", title="Uno", year=None))
+    _payload(root / "Due" / "Season 01" / "b.mkv", 222)
+    library.on_job_finished(_job(str(root / "Due" / "Season 01" / "b.mkv"),
+                                 external_id="2", title="Due", year=None))
+    _payload(root / "Nuova" / "Season 01" / "a.mkv", 111)
+    _payload(root / "Nuova" / "Season 01" / "b.mkv", 222)
+    shutil.rmtree(root / "Uno")
+    shutil.rmtree(root / "Due")
+
+    library.reconcile()
+
+    folders = [library.for_title("streamingcommunity", "episode", ext)[0].folder for ext in ("1", "2")]
+    assert folders.count("Nuova") == 1

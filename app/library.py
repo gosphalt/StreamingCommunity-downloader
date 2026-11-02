@@ -39,6 +39,7 @@ import os
 import re
 import sqlite3
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -626,13 +627,20 @@ def reconcile() -> dict:
 
         taken = {a.folder for a in active}
         sizes = None
+        # Two missing titles with the same anchor size cannot be told apart by size:
+        # neither is moved, the same as two folders holding that size.
+        anchors = Counter(a.anchor_size for a in missing if a.anchor_size)
         for association in missing:
             if association.anchor_size:
                 if sizes is None:
                     sizes = _sizes_by_folder(root, names - taken)
-                holders = sizes.get(association.anchor_size, set())
-                if len(holders) == 1:
-                    _move(association, next(iter(holders)))
+                # Minus `taken`: a folder claimed earlier in this run is not a candidate
+                # again, or two titles would share one folder.
+                holders = sizes.get(association.anchor_size, set()) - taken
+                if len(holders) == 1 and anchors[association.anchor_size] == 1:
+                    folder = next(iter(holders))
+                    _move(association, folder)
+                    taken.add(folder)
                     summary["renamed"] += 1
                     continue
             if association.missing_since is None:

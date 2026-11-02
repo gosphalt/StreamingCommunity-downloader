@@ -80,15 +80,6 @@ class ScheduleStore:
                     self._save()
                     return
 
-    def remove_by_schedule_id(self, schedule_id: str) -> bool:
-        with self._lock:
-            before = len(self._entries)
-            self._entries = [e for e in self._entries if e["schedule_id"] != schedule_id]
-            if len(self._entries) < before:
-                self._save()
-                return True
-        return False
-
     def remove_by_job_id(self, job_id: str) -> bool:
         """Called when a completed/cancelled job is dismissed from the UI."""
         with self._lock:
