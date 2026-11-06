@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/download", tags=["downloads"])
 # One request can queue a whole series. The cap keeps a mis-click from filling
 # the executor and the event stream with thousands of jobs.
 MAX_BATCH_JOBS = 500
+ANIME_CHUNK = 100
 
 # Starting a download directly is the privilege this whole feature exists to
 # gate: without it a user goes through the request queue instead.
@@ -326,16 +327,16 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
                                      listed[i].get("number"), body.anime_type)
         ))
         episodes = [listed[i] for i in indices]
-        _check_size(len(episodes), skipped)
+        _check_size(min(len(episodes), MAX_BATCH_JOBS), skipped)
 
-        def make(episode):
+        def make(episode, label):
             def submit(batch_id):
                 common = dict(
                     anime_type=body.anime_type, year=body.year,
                     audio_languages=body.audio_languages,
                     subtitle_languages=body.subtitle_languages,
                     user_id=user_id, batch_id=batch_id, batch_kind="anime_all",
-                    batch_label=body.anime_name,
+                    batch_label=label,
                 )
                 if body.scheduled_at:
                     return job_manager.schedule_anime_episode(
@@ -346,8 +347,18 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
                 )
             return submit
 
-        return {**_run_batch("anime_all", body.anime_name, user_id,
-                             [make(ep) for ep in episodes]), "skipped": skipped}
+        # Long series go in as groups of ANIME_CHUNK, each its own batch, so the
+        # downloads page can pause/resume a group at a time.
+        chunks = [episodes[i:i + ANIME_CHUNK] for i in range(0, len(episodes), ANIME_CHUNK)]
+        runs = []
+        for chunk in chunks:
+            label = body.anime_name if len(chunks) == 1 else (
+                f"{body.anime_name} — episodi {chunk[0].get('number')}–{chunk[-1].get('number')}")
+            runs.append(_run_batch("anime_all", label, user_id, [make(ep, label) for ep in chunk]))
+        return {"batch_id": runs[0]["batch_id"],
+                "batch_ids": [r["batch_id"] for r in runs],
+                "job_ids": [j for r in runs for j in r["job_ids"]],
+                "count": sum(r["count"] for r in runs), "skipped": skipped}
 
     result = await asyncio.to_thread(_enumerate, work)
     return {**result, "status": "scheduled" if body.scheduled_at else "queued"}
