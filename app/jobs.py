@@ -41,7 +41,9 @@ AUTO_RETRIES = 3
 AUTO_RETRY_DELAY = 60  # seconds
 
 
-@dataclass
+# eq=False: identity comparison. The generated __eq__ compares every field, which
+# made move()'s list membership tests O(n²) in dataclass comparisons (1.6 s at 500 jobs).
+@dataclass(eq=False)
 class DownloadJob:
     job_id: str
     title: str
@@ -206,7 +208,8 @@ class DownloadSlots:
             on_queued(job)
         with self._cond:
             try:
-                while not (self._next() is job and self._busy < self._limit):
+                # Free slot first: while all slots are busy, don't scan the whole line on every wake.
+                while not (self._busy < self._limit and self._next() is job):
                     if job.cancel_event.is_set():
                         return False
                     self._cond.wait()

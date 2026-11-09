@@ -56,7 +56,7 @@ function connectGlobalStream() {
           job.status = 'queued';
           job.queue_seq = msg.queue_seq;
           job.retry_at = null;
-          renderAllJobCards();
+          scheduleRenderAllJobCards();
           updateActiveBadge();
         }
         break;
@@ -496,6 +496,14 @@ function toggleJobGroup(batchId) {
   if (_dlCollapsed.has(batchId)) _dlCollapsed.delete(batchId);
   else _dlCollapsed.add(batchId);
   renderAllJobCards();
+}
+
+// One move can re-ticket hundreds of waiting jobs, one event each; render once per frame.
+let _renderPending = false;
+function scheduleRenderAllJobCards() {
+  if (_renderPending) return;
+  _renderPending = true;
+  requestAnimationFrame(() => { _renderPending = false; renderAllJobCards(); });
 }
 
 function renderAllJobCards() {
