@@ -397,3 +397,20 @@ def test_a_failed_decrypt_leaves_no_segment_behind(tmp_path):
     except ValueError:
         pass
     assert 0 in seg._missing_segments()
+
+
+def test_a_segment_decrypts_back_to_what_was_encrypted():
+    """AES-CBC with the playlist's key and IV: the one path every encrypted
+    stream goes through, and the one the cryptography upgrade touched."""
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    key, iv = os.urandom(16), os.urandom(16)
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(b"transport stream " * 100) + padder.finalize()
+    encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    encrypted = encryptor.update(padded) + encryptor.finalize()
+
+    decryption = m3u8.Decryption(key)
+    decryption.parse_key("0x" + iv.hex())
+    assert decryption.decrypt_ts(encrypted) == padded
