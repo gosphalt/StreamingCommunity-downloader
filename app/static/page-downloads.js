@@ -459,6 +459,8 @@ function renderDlStats() {
   }
   const retryAll = document.getElementById('dl-retry-btn');
   if (retryAll) retryAll.style.display = counts.error && can('DOWNLOAD') ? '' : 'none';
+  const clearFailed = document.getElementById('dl-clear-failed-btn');
+  if (clearFailed) clearFailed.style.display = counts.error && can('DOWNLOAD') ? '' : 'none';
 }
 
 // One group heading for a batch, with what the batch is doing as a whole —
@@ -813,6 +815,16 @@ async function retryFailed() {
   if (refused) showToast(`${refused} download non sono stati rimessi in coda`, 'warning');
 }
 
+// Asked first: a failed job is the only record of what still had to download.
+async function clearFailed() {
+  const failed = [..._jobs.entries()].filter(([,j]) => j.status==='error').map(([id]) => id);
+  if (!failed.length || !await scConfirm(`Rimuovere ${failed.length} download falliti?`)) return;
+  await Promise.allSettled(failed.map(id => api.del(`/api/download/${id}`)));
+  for (const id of failed) _jobs.delete(id);
+  renderAllJobCards();
+  updateActiveBadge();
+}
+
 async function dismissJob(jobId) {
   try {
     await api.del(`/api/download/${jobId}`);
@@ -855,6 +867,7 @@ registerActions({
   'jobs:bulk':        d => bulkAction(d.bulk),
   'jobs:retry':       d => retryJob(d.job),
   'jobs:retryFailed': () => retryFailed(),
+  'jobs:clearFailed': () => clearFailed(),
   'jobs:dismiss':     d => dismissJob(d.job),
   'jobs:toggleGroup': d => toggleJobGroup(d.batch),
 });
