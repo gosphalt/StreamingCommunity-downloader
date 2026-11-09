@@ -139,7 +139,7 @@ def test_a_slow_subscriber_keeps_receiving_events(manager):
         manager.set_loop(asyncio.get_running_loop())
         q = manager.subscribe()
         for i in range(q.maxsize + 5):
-            await manager._fanout({"type": "progress", "n": i})
+            await manager._fanout({"type": "job_status", "n": i})
 
         assert q in manager._subscribers, "il client è stato disiscritto in silenzio"
         assert q.full()
@@ -150,6 +150,27 @@ def test_a_slow_subscriber_keeps_receiving_events(manager):
         while not q.empty():
             newest = q.get_nowait()
         assert newest["n"] == q.maxsize + 4
+
+    asyncio.run(scenario())
+
+
+def test_a_queue_position_survives_a_flood_of_progress(manager):
+    """job_queued is sent once per job and never repeated: a flood of progress
+    frames must not push it out, or the card loses its place in the line."""
+    import asyncio
+
+    async def scenario():
+        manager.set_loop(asyncio.get_running_loop())
+        q = manager.subscribe()
+        for i in range(q.maxsize * 2):
+            await manager._fanout({"type": "progress", "n": i})
+        await manager._fanout({"type": "job_queued", "job_id": "x", "queue_seq": 7})
+
+        seen = []
+        while not q.empty():
+            seen.append(q.get_nowait())
+        assert {"type": "job_queued", "job_id": "x", "queue_seq": 7} in seen
+        assert len(seen) <= q.maxsize // 2 + 1, "progress was not shed past half full"
 
     asyncio.run(scenario())
 

@@ -318,7 +318,7 @@ class JobManager:
     # ── Global pub/sub ─────────────────────────────────────────────────────────
 
     def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=256)
+        q: asyncio.Queue = asyncio.Queue(maxsize=4096)
         self._subscribers.append(q)
         return q
 
@@ -376,8 +376,14 @@ class JobManager:
         would ever write to again: the page looked live and silently stopped
         updating until it was reloaded. Discarding the oldest event instead
         costs a stale frame of progress and lets the next one repair the view.
+        Progress is shed first, once half the queue is full: each frame is
+        superseded by the next, while job_queued (which carries the queue
+        position) is sent once and never repeated, so losing it leaves a card
+        with no place in the line and no arrows.
         """
         for q in list(self._subscribers):
+            if event.get("type") == "progress" and q.qsize() >= q.maxsize // 2:
+                continue
             while True:
                 try:
                     q.put_nowait(event)
