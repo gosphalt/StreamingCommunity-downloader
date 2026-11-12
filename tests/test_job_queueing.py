@@ -239,3 +239,53 @@ def test_the_pool_covers_a_full_batch():
         assert jm._executor._max_workers >= MAX_BATCH_JOBS
     finally:
         jm._executor.shutdown(wait=False)
+
+
+def test_a_hand_off_looks_at_the_line_once_not_once_per_waiter(monkeypatch):
+    """Every waiter used to wake on every change and scan the whole line: with
+    600 jobs waiting, one finished download cost ~850 ms of CPU, and the web
+    side stalled behind the GIL. Now a change works out who is next once and
+    wakes only that job."""
+    from datetime import datetime, timezone
+
+    from app.jobs import DownloadJob, DownloadSlots
+
+    looked = 0
+    real_key = DownloadSlots._order_key
+
+    def counting_key(job):
+        nonlocal looked
+        looked += 1
+        return real_key(job)
+
+    monkeypatch.setattr(DownloadSlots, "_order_key", staticmethod(counting_key))
+
+    waiting = 40
+    slots = DownloadSlots(1)
+    jobs = [DownloadJob(job_id=str(i), title=f"t{i}", type="film", status="queued",
+                        created_at=datetime.now(timezone.utc)) for i in range(waiting + 1)]
+    started = []
+
+    def run(job):
+        if slots.acquire(job):
+            started.append(job)
+
+    threads = [threading.Thread(target=run, args=(job,), daemon=True) for job in jobs]
+    try:
+        for thread in threads:
+            thread.start()
+        assert _wait_for(lambda: len(started) == 1 and len(slots._line) == waiting)
+
+        looked = 0
+        slots.release()
+        assert _wait_for(lambda: len(started) == 2), "the next job never got the freed slot"
+        assert _wait_for(lambda: len(slots._line) == waiting - 1)
+
+        assert looked <= waiting * 4, f"{looked} looks at a line of {waiting}: back to one scan per waiter"
+    finally:
+        for job in jobs:
+            job.cancel_event.set()
+        slots.wake()
+        for thread in threads:
+            thread.join(timeout=2)
+    assert not any(thread.is_alive() for thread in threads), "a cancelled waiter was not woken"

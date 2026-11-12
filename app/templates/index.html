@@ -59,6 +59,9 @@
               <button class="source-btn" id="src-au" data-action="search:source" data-source="animeunity">
                 <i class="ti ti-sword"></i>AnimeUnity
               </button>
+              <button class="source-btn" id="src-yt" data-action="search:source" data-source="youtube">
+                <i class="ti ti-brand-youtube"></i>YouTube
+              </button>
             </div>
             <div class="sc-searchbar">
               <input type="text" id="search-input"
@@ -72,6 +75,16 @@
           <div id="search-filters" class="search-filters"></div>
           <div id="browse-bar" style="display:none"></div>
           <div id="home-shelves" style="display:none"></div>
+          <div id="yt-panel" class="card card-body mb-3" style="display:none">
+            <label class="form-label" for="yt-path">Cartella di download YouTube</label>
+            <div class="d-flex gap-2">
+              <input type="text" id="yt-path" class="form-control" placeholder="Percorso della cartella">
+              <button class="source-btn" data-action="yt:savePath">
+                <i class="ti ti-device-floppy"></i>Salva
+              </button>
+            </div>
+            <div class="form-hint">Tutti i video YouTube vanno in questa cartella.</div>
+          </div>
           <div id="search-results" class="row g-3"></div>
           <div id="search-more" class="text-center mt-4" style="display:none">
             <button class="source-btn" id="search-more-btn" data-action="search:more">

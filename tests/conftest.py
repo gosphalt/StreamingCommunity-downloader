@@ -290,8 +290,11 @@ def stub_jobs(monkeypatch):
 
         return _submit
 
-    for name in ("submit_film", "submit_episode", "submit_anime_episode"):
+    for name in ("submit_film", "submit_episode", "submit_anime_episode", "submit_youtube"):
         monkeypatch.setattr(job_manager, name, fake_submit(name))
+    # The YouTube search talks to the network; a grant test must not.
+    from app.core import youtube
+    monkeypatch.setattr(youtube, "search", lambda query, limit=20: [])
     return submitted
 
 
