@@ -412,6 +412,9 @@ def make_user(username: str, jellyfin_user_id: str, perms: int, enabled: bool = 
 def session_for(client, user_id: int):
     """Attach a session cookie for ``user_id`` to ``client`` and return its CSRF token."""
     raw_token, csrf_token = sessions.create_session(user_id)
+    # Drop a cookie an earlier request set (the setup wizard's, on
+    # testserver.local): the jar would send that one first and keep the old user.
+    client.cookies.delete(sessions.SESSION_COOKIE)
     client.cookies.set(sessions.SESSION_COOKIE, raw_token)
     return csrf_token
 
