@@ -116,3 +116,22 @@ def test_the_other_container_of_the_same_video_is_removed(tmp_path, fake_ydl):
 def test_a_bad_id_never_reaches_yt_dlp(tmp_path, fake_ydl):
     with pytest.raises(ValueError):
         youtube.download_youtube("../../etc/passwd", "x", str(tmp_path), str(tmp_path / "tmp"))
+
+
+def test_search_passes_language_only_when_set(monkeypatch):
+    # The extractor arg changes which titles come back, so it must be absent
+    # when no language is chosen, not sent as an empty string.
+    seen = []
+
+    class _Search:
+        def __init__(self, opts):
+            seen.append(opts)
+
+        def extract_info(self, url, download=False):
+            return {"entries": []}
+
+    monkeypatch.setattr(youtube.yt_dlp, "YoutubeDL", _Search)
+    youtube.search("x", lang="")
+    youtube.search("x", lang="it")
+    assert "extractor_args" not in seen[0]
+    assert seen[1]["extractor_args"] == {"youtube": {"lang": ["it"]}}

@@ -69,6 +69,20 @@ def download_dir() -> str:
     return config.read_data().get("youtube_dir") or default_dir()
 
 
+# Codes YouTube serves titles in. "" keeps the uploader's own wording.
+LANGUAGES = ("", "it", "en", "es", "fr", "de", "pt", "ja", "ko")
+
+
+def search_lang() -> str:
+    lang = config.read_data().get("youtube_lang") or ""
+    return lang if lang in LANGUAGES else ""
+
+
+def _lang_opts(lang: str) -> dict:
+    # Only titles that have a translation change; the rest keep their own.
+    return {"extractor_args": {"youtube": {"lang": [lang]}}} if lang else {}
+
+
 def _card(entry: dict) -> dict:
     return {
         "id": entry["id"],
@@ -78,14 +92,14 @@ def _card(entry: dict) -> dict:
     }
 
 
-def search(query: str, limit: int = 20) -> list[dict]:
+def search(query: str, limit: int = 20, lang: str = "") -> list[dict]:
     """Results for a query, or the one video a link points at. Raises DownloadError."""
     video_id = video_id_from_link(query)
     if video_id:
-        info = yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True}).extract_info(
+        info = yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True, **_lang_opts(lang)}).extract_info(
             WATCH_URL + video_id, download=False)
         return [_card(info)]
-    opts = {"quiet": True, "skip_download": True, "extract_flat": True}
+    opts = {"quiet": True, "skip_download": True, "extract_flat": True, **_lang_opts(lang)}
     info = yt_dlp.YoutubeDL(opts).extract_info(f"ytsearch{limit}:{query}", download=False)
     return [_card(e) for e in info.get("entries") or [] if e and e.get("id")]
 

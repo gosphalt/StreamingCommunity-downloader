@@ -84,6 +84,19 @@
               </button>
             </div>
             <div class="form-hint">Tutti i video YouTube vanno in questa cartella.</div>
+            <label class="form-label mt-3" for="yt-lang">Lingua dei titoli</label>
+            <select id="yt-lang" class="form-select" data-change="yt:lang">
+              <option value="">Originale (come caricato)</option>
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="pt">Português</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+            </select>
+            <div class="form-hint">Usata solo dove YouTube ha una traduzione del titolo.</div>
           </div>
           <div id="search-results" class="row g-3"></div>
           <div id="search-more" class="text-center mt-4" style="display:none">

@@ -294,7 +294,7 @@ def stub_jobs(monkeypatch):
         monkeypatch.setattr(job_manager, name, fake_submit(name))
     # The YouTube search talks to the network; a grant test must not.
     from app.core import youtube
-    monkeypatch.setattr(youtube, "search", lambda query, limit=20: [])
+    monkeypatch.setattr(youtube, "search", lambda query, limit=20, lang="": [])
     return submitted
 
 

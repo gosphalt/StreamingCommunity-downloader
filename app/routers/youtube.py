@@ -27,7 +27,7 @@ class PathUpdate(BaseModel):
 @router.get("/search", dependencies=CAN_DOWNLOAD)
 async def search(q: str = Query(..., min_length=1, max_length=200)):
     try:
-        return await asyncio.to_thread(youtube.search, q.strip())
+        return await asyncio.to_thread(youtube.search, q.strip(), lang=youtube.search_lang())
     except DownloadError as e:
         logger.warning("YouTube search failed: %s", e)
         raise HTTPException(status_code=502, detail="YouTube non risponde o la ricerca è fallita")
@@ -36,6 +36,23 @@ async def search(q: str = Query(..., min_length=1, max_length=200)):
 @router.get("/path", dependencies=CAN_DOWNLOAD)
 def get_path():
     return {"path": youtube.download_dir(), "default": youtube.default_dir()}
+
+
+class LangUpdate(BaseModel):
+    lang: str = Field(max_length=5)
+
+
+@router.get("/lang", dependencies=CAN_DOWNLOAD)
+def get_lang():
+    return {"lang": youtube.search_lang()}
+
+
+@router.put("/lang", dependencies=CAN_MANAGE)
+def set_lang(body: LangUpdate):
+    if body.lang not in youtube.LANGUAGES:
+        raise HTTPException(status_code=400, detail="Lingua non supportata")
+    config.update_data({"youtube_lang": body.lang})
+    return {"lang": body.lang}
 
 
 @router.put("/path", dependencies=CAN_MANAGE)

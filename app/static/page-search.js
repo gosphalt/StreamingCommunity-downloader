@@ -47,10 +47,11 @@ function _markSourceButtons(src) {
 function _showYoutubeMode(on) {
   const panel = document.getElementById('yt-panel');
   if (panel) panel.style.display = on ? '' : 'none';
-  for (const id of ['home-shelves', 'browse-bar']) {
-    const el = document.getElementById(id);
-    if (el && on) el.style.display = 'none';
-  }
+  // Also un-hides #search-results: the start page hides it, and a YouTube
+  // search rendered into that hidden grid shows nothing.
+  if (on) _setStartPageVisible(false);
+  const browse = document.getElementById('browse-bar');
+  if (browse && on) browse.style.display = 'none';
   const filters = document.getElementById('search-filters');
   if (filters && on) filters.innerHTML = '';
   if (on) loadYoutubePath();
@@ -753,15 +754,19 @@ async function doYoutubeSearch(q) {
       container.innerHTML = '<div class="col-12 text-center text-secondary py-4">Nessun risultato.</div>';
       return;
     }
+    // Same grid as the poster cards, with the poster's 2:3 turned into 3:2.
     container.innerHTML = items.map(v => `
-      <div class="col-12 col-md-6 col-xl-4">
-        <div class="card h-100">
-          <img class="card-img-top" loading="lazy" referrerpolicy="no-referrer" alt=""
-               src="https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg">
-          <div class="card-body d-flex flex-column">
-            <div class="fw-bold text-truncate" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
-            <div class="text-secondary small mb-2">${escapeHtml(v.channel)}${v.duration ? ' · ' + _fmtDuration(v.duration) : ''}</div>
-            <button class="btn btn-primary btn-sm mt-auto" data-action="yt:download"
+      <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+        <div class="result-card">
+          <div class="poster-wrap" style="aspect-ratio:3/2">
+            <img src="https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg" alt=""
+                 loading="lazy" referrerpolicy="no-referrer">
+            <div class="poster-overlay"></div>
+          </div>
+          <div class="card-meta">
+            <div class="card-title-text" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
+            <div class="text-secondary small text-truncate">${escapeHtml(v.channel)}${v.duration ? ' · ' + _fmtDuration(v.duration) : ''}</div>
+            <button class="btn btn-primary btn-sm w-100 mt-2" data-action="yt:download"
                     data-id="${escapeHtml(v.id)}" data-title="${escapeHtml(v.title)}">
               <i class="ti ti-download me-1"></i>Scarica
             </button>
@@ -792,6 +797,19 @@ async function loadYoutubePath() {
     input.value = p.path;
     input.placeholder = p.default;
   } catch (e) { /* the field stays empty; saving still works */ }
+  try {
+    document.getElementById('yt-lang').value = (await api.get('/api/youtube/lang')).lang;
+  } catch (e) { /* the menu keeps its first option */ }
+}
+
+async function saveYoutubeLang(lang) {
+  try {
+    await api.put('/api/youtube/lang', {lang});
+    showToast('Lingua salvata', 'success');
+  } catch (e) {
+    showToast(e.message || 'Lingua non salvata', 'danger');
+    loadYoutubePath();
+  }
 }
 
 async function saveYoutubePath() {
@@ -810,6 +828,7 @@ async function saveYoutubePath() {
 registerActions({
   'yt:download':   d => ytDownload(d),
   'yt:savePath':   () => saveYoutubePath(),
+  'yt:lang':       (d, el) => saveYoutubeLang(el.value),
   'search:source': d => setSource(d.source),
   'search:run':    () => doSearch(),
   'search:more':   () => loadMoreResults(),
