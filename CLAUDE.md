@@ -63,6 +63,7 @@ request before any route runs.
 - `animeunity.py` — AnimeUnity search (`/archivio/get-animes`, paged 30 at a time,
   with the source's own `type` and `dubbed` filters), episodes, download
 - `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
+- `youtube.py` — yt-dlp search and single-video download (not HLS). The download folder is `data.json` `youtube_dir`, one for all of YouTube, set in the YouTube tab (`/api/youtube/path`). The client sends a video id, never a URL: the watch URL is built here, so host checks cannot be bypassed.
 - `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
 - `headers.py` — user-agent rotation, `sanitize_filename`
 - `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, `with_retry`,

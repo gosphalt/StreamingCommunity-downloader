@@ -165,9 +165,12 @@ def test_library_dirs_include_videos_dir_only_as_a_fallback(tmp_path, monkeypatc
     data_file.write_text(json.dumps({"libraries": [
         {"type": "film", "path": str(tmp_path / "films")},
     ]}))
-    assert main_module._library_dirs() == sorted([tmp_path / "films", tmp_path / "videos"])
+    # The YouTube folder is always a download target, so it is listed too.
+    youtube = tmp_path / "videos" / "YouTube"
+    assert main_module._library_dirs() == sorted([tmp_path / "films", tmp_path / "videos", youtube])
 
     data_file.write_text(json.dumps({"libraries": [
         {"type": kind, "path": str(tmp_path / kind)} for kind in ("film", "tv", "anime")
     ]}))
     assert tmp_path / "videos" not in main_module._library_dirs()
+    assert youtube in main_module._library_dirs()

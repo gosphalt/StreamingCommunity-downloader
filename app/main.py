@@ -20,7 +20,7 @@ from app.auth import session as auth_session
 from app.auth import setup_code
 from app.auth import users_router
 from app.auth.deps import AuthMiddleware
-from app.core import domain_recovery
+from app.core import domain_recovery, youtube
 from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
 from app.watches import poller as watch_poller, router as watches_router
@@ -30,7 +30,7 @@ from app.mcp import server as mcp_http
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
     metadata as metadata_router, download_hooks, library as library_router, mcp as mcp_router,
-    favorites,
+    favorites, youtube as youtube_router,
 )
 
 logging.basicConfig(
@@ -97,6 +97,7 @@ def _library_dirs() -> list[Path]:
     dirs = {Path(lib["path"]) for lib in libraries if lib.get("path")}
     if not {"film", "tv", "anime"} <= {lib.get("type") for lib in libraries}:
         dirs.add(config.VIDEOS_DIR)
+    dirs.add(Path(youtube.download_dir()))
     return sorted(dirs)
 
 
@@ -210,6 +211,7 @@ app.include_router(progress.router)
 app.include_router(files.router)
 app.include_router(images.router)
 app.include_router(anime.router)
+app.include_router(youtube_router.router)
 
 
 @app.get("/", response_class=HTMLResponse)

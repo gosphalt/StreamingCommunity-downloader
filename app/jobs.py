@@ -150,11 +150,19 @@ class DownloadSlots:
     """
 
     def __init__(self, limit: int):
-        self._cond = threading.Condition()
+        self._cond = threading.Lock()   # guards everything below
+        # One condition per waiting job, all on that lock: a change wakes the
+        # job it concerns instead of the whole line.
+        self._waiters: dict = {}
         self._limit = limit
         self._busy = 0
         self._line: deque = deque()
         self._tickets = 0
+        # Who is next, kept until something changes. Waking every waiter to
+        # re-scan the whole line made a hand-off with 600 jobs waiting cost
+        # ~850 ms of CPU, and the GIL starved the web side meanwhile.
+        self._head: Optional["DownloadJob"] = None
+        self._head_stale = True
 
     @staticmethod
     def _order_key(j: "DownloadJob"):
@@ -164,8 +172,25 @@ class DownloadSlots:
 
     def _next(self) -> Optional["DownloadJob"]:
         """The job that gets the next free slot. Caller holds the lock."""
-        ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
-        return max(ready, key=self._order_key, default=None)
+        if self._head_stale:
+            ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
+            self._head = max(ready, key=self._order_key, default=None)
+            self._head_stale = False
+        return self._head
+
+    def _changed(self) -> None:
+        """The line, a flag or the limit changed: work out who is next again
+        and wake only who has something to do — the head, if a slot is free,
+        and anyone cancelled, who leaves at once. Caller holds the lock. Pause,
+        cancel and priority are set outside it, which is why their setters call
+        wake()."""
+        self._head_stale = True
+        head = self._next() if self._busy < self._limit else None
+        for j in self._line:
+            if j is head or j.cancel_event.is_set():
+                waiter = self._waiters.get(id(j))
+                if waiter is not None:
+                    waiter.notify()
 
     def move(self, job: "DownloadJob", where: str) -> list:
         """Move a waiting job to the top, one place up or down, or the bottom.
@@ -190,12 +215,14 @@ class DownloadSlots:
             job.priority = (prev or nxt).priority
             new_order = rest[:p] + [job] + rest[p:]
             changed = [job] if job.priority != old_priority else []
+            listed = {id(j) for j in changed}  # a list lookup per job made "top" quadratic
             for seq, j in zip(sorted(x.queue_seq for x in line), new_order):
                 if j.queue_seq != seq:
                     j.queue_seq = seq
-                    if j not in changed:
+                    if id(j) not in listed:
+                        listed.add(id(j))
                         changed.append(j)
-            self._cond.notify_all()
+            self._changed()
             return changed
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
@@ -204,40 +231,42 @@ class DownloadSlots:
             self._tickets += 1
             job.queue_seq = self._tickets
             self._line.append(job)
+            self._head_stale = True
         if on_queued is not None:
             on_queued(job)
         with self._cond:
+            waiter = self._waiters[id(job)] = threading.Condition(self._cond)
             try:
-                # Free slot first: while all slots are busy, don't scan the whole line on every wake.
                 while not (self._busy < self._limit and self._next() is job):
                     if job.cancel_event.is_set():
                         return False
-                    self._cond.wait()
+                    waiter.wait()
                 if job.cancel_event.is_set():
                     return False
                 self._busy += 1
                 return True
             finally:
                 self._line.remove(job)
+                del self._waiters[id(job)]
                 job.queue_seq = None
                 # The next in line may now be at the head with a slot free.
-                self._cond.notify_all()
+                self._changed()
 
     def release(self) -> None:
         with self._cond:
             self._busy -= 1
-            self._cond.notify_all()
+            self._changed()
 
     def resize(self, limit: int) -> None:
         with self._cond:
             self._limit = limit
-            self._cond.notify_all()
+            self._changed()
 
     def wake(self) -> None:
         """Let waiters re-check: a cancelled one leaves the line, and a pause or
         priority change reorders who is next."""
         with self._cond:
-            self._cond.notify_all()
+            self._changed()
 
 
 class JobManager:
@@ -815,6 +844,21 @@ class JobManager:
             subtitle_languages=subtitle_languages or ["ita", "eng"],
             strict_audio=strict_audio,
             tmdb_id=tmdb_id,
+        )
+
+    def submit_youtube(self, video_id: str, title: str, user_id: int = None) -> str:
+        from app.core.youtube import download_dir, download_youtube
+
+        # Not schedulable and not a batch: _build_call has no branch for it on purpose.
+        job = self._make_job(title, "youtube", phases=["video", "done"],
+                             user_id=user_id, media_label=title, external_id=video_id)
+        return self._submit_job(
+            job, download_youtube,
+            video_id, title,
+            output_dir=download_dir(),
+            temp_dir=str(TMP_DIR / job.job_id),
+            progress_factory=self._make_progress_factory(job),
+            cancel_event=job.cancel_event,
         )
 
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,

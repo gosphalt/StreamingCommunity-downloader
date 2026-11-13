@@ -21,7 +21,7 @@ function connectGlobalStream() {
       case 'snapshot':
         _jobs.clear();
         msg.jobs.forEach(j => _jobs.set(j.job_id, j));
-        renderAllJobCards();
+        scheduleRenderAllJobCards();
         updateActiveBadge();
         break;
       case 'job_created':
@@ -34,7 +34,7 @@ function connectGlobalStream() {
         // stays in "in corso" and says when that is and why.
         _jobs.set(msg.job.job_id, msg.job);
         delete _jobPhases[msg.job.job_id];
-        renderAllJobCards();
+        scheduleRenderAllJobCards();
         updateActiveBadge();
         break;
       case 'job_status':
@@ -44,7 +44,7 @@ function connectGlobalStream() {
           if (msg.status === 'running') { job.retry_at = null; job.queue_seq = null; }
           // A job starting moves every waiting one up a place, and moves itself
           // from "In attesa" to "In corso": the whole list, not one card.
-          renderAllJobCards();
+          scheduleRenderAllJobCards();
           updateActiveBadge();
         }
         break;
@@ -63,7 +63,7 @@ function connectGlobalStream() {
       case 'job_flags':
         if (_jobs.has(msg.job_id)) {
           Object.assign(_jobs.get(msg.job_id), {paused: msg.paused, priority: msg.priority});
-          renderAllJobCards();
+          scheduleRenderAllJobCards();
         }
         break;
       case 'progress':
@@ -80,7 +80,7 @@ function connectGlobalStream() {
         break;
       case 'job_dismissed':
         _jobs.delete(msg.job_id);
-        renderAllJobCards();
+        scheduleRenderAllJobCards();
         updateActiveBadge();
         break;
       case 'domain_candidate':
@@ -290,13 +290,23 @@ function _goesFirst(a, b) {
   return pa !== pb ? pa > pb : a.queue_seq < b.queue_seq;
 }
 
+// Worked out for the whole line at once. Counting who is ahead card by card
+// made a redraw quadratic: 1300 waiting jobs, 1.7 million comparisons.
+let _queuePositions = null;
+
 function _queuePosition(j) {
   if (j.queue_seq == null) return null;
-  let ahead = 0;
-  _jobs.forEach(o => {
-    if (o.status === 'queued' && o.queue_seq != null && !o.paused && _goesFirst(o, j)) ahead += 1;
-  });
-  return ahead + 1;
+  if (!_queuePositions) {
+    _queuePositions = new Map();
+    [..._jobs.values()]
+      .filter(o => o.status === 'queued' && o.queue_seq != null && !o.paused)
+      .sort((a, b) => _goesFirst(a, b) ? -1 : 1)
+      .forEach((o, i) => _queuePositions.set(o.job_id, i + 1));
+    // Good for the handler that asked: jobs only change between handlers.
+    queueMicrotask(() => { _queuePositions = null; });
+  }
+  // A paused job is not in the line; its card says so instead of a number.
+  return _queuePositions.get(j.job_id) ?? null;
 }
 
 function _waitingText(j) {
@@ -320,6 +330,7 @@ function _buildJobCard(j) {
   const isActive = _isUnfinished(j);
   const isMovie = j.type==='film';
   const isAnimeJob = j.type==='anime';
+  const isYoutubeJob = j.type==='youtube';
   const pct = j.progress?.pct||0;
   const barClass = _phaseBar(phase);
   const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
@@ -350,7 +361,7 @@ function _buildJobCard(j) {
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
         ${isActive && can('DOWNLOAD') ? `<input type="checkbox" class="form-check-input flex-shrink-0 m-0" data-change="jobs:select" data-job="${j.job_id}"${_dlSelected.has(j.job_id) ? ' checked' : ''}>` : ''}
-        <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':'TV'}</span>
+        <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':isYoutubeJob?'bg-red-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':isYoutubeJob?'YouTube':'TV'}</span>
         <span class="fw-medium text-truncate flex-1" style="min-width:0" title="${escapeHtml(j.title)}">${escapeHtml(j.title)}</span>
         <span class="badge ${badgeClass} flex-shrink-0" id="job-badge-${j.job_id}">${label}</span>
         ${j.status === 'queued' || j.status === 'running' ? _controlsHtml(j) : ''}
@@ -500,7 +511,9 @@ function toggleJobGroup(batchId) {
   renderAllJobCards();
 }
 
-// One move can re-ticket hundreds of waiting jobs, one event each; render once per frame.
+// Everything the event stream changes is drawn at most once per frame: one move
+// re-tickets hundreds of waiting jobs, and a batch announces hundreds of new
+// ones, one event each — a full redraw per event froze the page for seconds.
 let _renderPending = false;
 function scheduleRenderAllJobCards() {
   if (_renderPending) return;
@@ -512,6 +525,7 @@ function renderAllJobCards() {
   const container = document.getElementById('jobs-container');
   const empty = document.getElementById('jobs-empty');
   if (!container) return;
+  _queuePositions = null;
   renderDlStats();
 
   const visible = [..._jobs.values()].filter(
@@ -559,7 +573,7 @@ function renderAllJobCards() {
 // every other entry sorts. Inserting a node at the top guessed at all three;
 // re-rendering answers them.
 function addJobCard(job) {
-  renderAllJobCards();
+  scheduleRenderAllJobCards();
 }
 
 function refreshCardAppearance(jobId) {
@@ -703,7 +717,7 @@ function handleDoneEvent(jobId, outputPath) {
   // also left the "in corso" bucket, though, which moves it in the order,
   // changes its batch's summary, and under a filter may mean it no longer
   // belongs on screen at all - none of which a card can do to itself.
-  renderAllJobCards();
+  scheduleRenderAllJobCards();
   updateActiveBadge();
   // Refresh file manager if open
   if (document.getElementById('page-files')?.style.display!=='none') loadFiles();
@@ -726,7 +740,7 @@ function handleErrorEvent(jobId, message) {
   if (stop) stop.innerHTML='';
 
   // Same reason as handleDoneEvent: a failed job has changed bucket.
-  renderAllJobCards();
+  scheduleRenderAllJobCards();
   updateActiveBadge();
 }
 

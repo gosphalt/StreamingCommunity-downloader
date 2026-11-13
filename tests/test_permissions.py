@@ -47,6 +47,13 @@ def _no_outbound_source(monkeypatch):
 CASES = [
     ((Permission.DOWNLOAD,), "POST", "/api/download/film",
      {"id": 1, "title": "x", "domain": "example.test"}),
+    ((Permission.DOWNLOAD,), "POST", "/api/download/youtube",
+     {"video_id": "dQw4w9WgXcQ", "title": "x"}),
+    ((Permission.DOWNLOAD,), "GET", "/api/youtube/search?q=x", None),
+    ((Permission.DOWNLOAD,), "GET", "/api/youtube/path", None),
+    ((Permission.MANAGE_SETTINGS,), "PUT", "/api/youtube/path", {"path": "/tmp/yt-test"}),
+    ((Permission.MANAGE_SETTINGS,), "PUT", "/api/youtube/lang", {"lang": "it"}),
+    ((Permission.DOWNLOAD,), "GET", "/api/youtube/lang", None),
     ((Permission.DOWNLOAD,), "POST", "/api/download/season",
      {"tv_id": 1, "slug": "x", "tv_name": "x", "season": 1}),
     ((Permission.DOWNLOAD,), "POST", "/api/download/series",

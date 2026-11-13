@@ -378,6 +378,18 @@ def download_film(body: FilmDownloadRequest, http_request: HttpRequest):
     return {"job_id": job_id, "status": "queued"}
 
 
+class YoutubeDownloadRequest(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    title: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/youtube", status_code=202, dependencies=CAN_DOWNLOAD)
+def download_youtube(body: YoutubeDownloadRequest, http_request: HttpRequest):
+    job_id = job_manager.submit_youtube(
+        body.video_id, body.title, user_id=_acting_user_id(http_request))
+    return {"job_id": job_id, "status": "queued"}
+
+
 @router.post("/episode", status_code=202, dependencies=CAN_DOWNLOAD)
 def download_episode(body: EpisodeDownloadRequest, http_request: HttpRequest):
     if body.ep_index < 0 or body.ep_index >= len(body.eps):

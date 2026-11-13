@@ -28,12 +28,39 @@ function kindBadge(item) {
 
 // ── Source selector ────────────────────────────────────────────────────────────
 
+// The YouTube tab shares the query box but none of the StreamingCommunity
+// machinery: no filters, shelves or browse, and its own folder setting.
+const _SOURCE_PLACEHOLDERS = {
+  streamingcommunity: 'Film, serie TV...',
+  animeunity: 'Cerca anime...',
+  youtube: 'Cerca su YouTube o incolla un link...',
+};
+
+function _markSourceButtons(src) {
+  for (const [id, key] of [['src-sc', 'streamingcommunity'], ['src-au', 'animeunity'], ['src-yt', 'youtube']]) {
+    document.getElementById(id)?.classList.toggle('active', src === key);
+  }
+  const input = document.getElementById('search-input');
+  if (input) input.placeholder = _SOURCE_PLACEHOLDERS[src];
+}
+
+function _showYoutubeMode(on) {
+  const panel = document.getElementById('yt-panel');
+  if (panel) panel.style.display = on ? '' : 'none';
+  // Also un-hides #search-results: the start page hides it, and a YouTube
+  // search rendered into that hidden grid shows nothing.
+  if (on) _setStartPageVisible(false);
+  const browse = document.getElementById('browse-bar');
+  if (browse && on) browse.style.display = 'none';
+  const filters = document.getElementById('search-filters');
+  if (filters && on) filters.innerHTML = '';
+  if (on) loadYoutubePath();
+}
+
 function setSource(src) {
   currentSource = src;
-  document.getElementById('src-sc').classList.toggle('active', src === 'streamingcommunity');
-  document.getElementById('src-au').classList.toggle('active', src === 'animeunity');
-  const input = document.getElementById('search-input');
-  if (input) input.placeholder = src === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
+  _markSourceButtons(src);
+  _showYoutubeMode(src === 'youtube');
   document.getElementById('search-results').innerHTML = '';
   // The kinds are each source's own vocabulary, so a filter does not carry over.
   _searchResults = [];
@@ -337,6 +364,10 @@ function renderResultCards(items, container, baseIndex,
 async function doSearch(options) {
   const append = !!(options && options.append);
   const q = document.getElementById('search-input').value.trim();
+  if (currentSource === 'youtube') {
+    if (q) doYoutubeSearch(q);
+    return;
+  }
   const browsing = !q && !!_browse;
   if (!q && !browsing) return;
   // The boot no longer blocks routing on the domain, so a search restored
@@ -485,7 +516,7 @@ function _shelfSkeletons() {
 
 async function showStartPage() {
   const host = document.getElementById('home-shelves');
-  if (!host) return;
+  if (!host || currentSource === 'youtube') return;
   if (currentSource !== 'animeunity') {
     await ensureDomain();
     if (!currentDomain) { _setStartPageVisible(false); return; }
@@ -697,9 +728,107 @@ function renderRequestRibbons() {
 }
 
 
+// ── YouTube ──────────────────────────────────────────────────────────────────
+//
+// Results come from yt-dlp on the server. Thumbnails are YouTube's own public
+// image host, loaded directly: the image proxy only serves the configured domain.
+
+let _ytAbort = null;
+
+function _fmtDuration(sec) {
+  const s = Math.round(Number(sec) || 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const pad = v => String(v).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
+async function doYoutubeSearch(q) {
+  const container = document.getElementById('search-results');
+  if (_ytAbort) _ytAbort.abort();
+  _ytAbort = new AbortController();
+  container.innerHTML = '<div class="col-12 text-center text-secondary py-4">' +
+    '<span class="spinner-border spinner-border-sm me-2"></span>Cerco su YouTube...</div>';
+  try {
+    const items = await api.get('/api/youtube/search', {q}, {signal: _ytAbort.signal});
+    if (!items.length) {
+      container.innerHTML = '<div class="col-12 text-center text-secondary py-4">Nessun risultato.</div>';
+      return;
+    }
+    // Same grid as the poster cards, with the poster's 2:3 turned into 3:2.
+    container.innerHTML = items.map(v => `
+      <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+        <div class="result-card">
+          <div class="poster-wrap" style="aspect-ratio:3/2">
+            <img src="https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg" alt=""
+                 loading="lazy" referrerpolicy="no-referrer">
+            <div class="poster-overlay"></div>
+          </div>
+          <div class="card-meta">
+            <div class="card-title-text" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
+            <div class="text-secondary small text-truncate">${escapeHtml(v.channel)}${v.duration ? ' · ' + _fmtDuration(v.duration) : ''}</div>
+            <button class="btn btn-primary btn-sm w-100 mt-2" data-action="yt:download"
+                    data-id="${escapeHtml(v.id)}" data-title="${escapeHtml(v.title)}">
+              <i class="ti ti-download me-1"></i>Scarica
+            </button>
+          </div>
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    container.innerHTML = '';
+    showToast(e.message || 'Ricerca YouTube fallita', 'danger');
+  }
+}
+
+async function ytDownload(d) {
+  try {
+    await api.post('/api/download/youtube', {video_id: d.id, title: d.title});
+    showToast('Download avviato', 'success');
+  } catch (e) {
+    showToast(e.message || 'Impossibile avviare il download', 'danger');
+  }
+}
+
+async function loadYoutubePath() {
+  const input = document.getElementById('yt-path');
+  if (!input) return;
+  try {
+    const p = await api.get('/api/youtube/path');
+    input.value = p.path;
+    input.placeholder = p.default;
+  } catch (e) { /* the field stays empty; saving still works */ }
+  try {
+    document.getElementById('yt-lang').value = (await api.get('/api/youtube/lang')).lang;
+  } catch (e) { /* the menu keeps its first option */ }
+}
+
+async function saveYoutubeLang(lang) {
+  try {
+    await api.put('/api/youtube/lang', {lang});
+    showToast('Lingua salvata', 'success');
+  } catch (e) {
+    showToast(e.message || 'Lingua non salvata', 'danger');
+    loadYoutubePath();
+  }
+}
+
+async function saveYoutubePath() {
+  const input = document.getElementById('yt-path');
+  try {
+    const p = await api.put('/api/youtube/path', {path: input.value.trim()});
+    input.value = p.path;
+    showToast('Cartella salvata', 'success');
+  } catch (e) {
+    showToast(e.message || 'Cartella non valida', 'danger');
+  }
+}
+
 // ── Delegated handlers ───────────────────────────────────────────────────────
 
 registerActions({
+  'yt:download':   d => ytDownload(d),
+  'yt:savePath':   () => saveYoutubePath(),
+  'yt:lang':       (d, el) => saveYoutubeLang(el.value),
   'search:source': d => setSource(d.source),
   'search:run':    () => doSearch(),
   'search:more':   () => loadMoreResults(),
@@ -723,7 +852,7 @@ registerPageHash('search', {
   read: () => ({
     params: {
       q: document.getElementById('search-input')?.value.trim() || null,
-      src: currentSource === 'animeunity' ? 'animeunity' : null,
+      src: currentSource !== 'streamingcommunity' ? currentSource : null,
       type: _kindFilter || null,
       dub: _dubOnly ? '1' : null,
       // Esplora has no query to restore, so its filters are the address.
@@ -737,10 +866,9 @@ registerPageHash('search', {
     if (input) input.value = params.q || '';
     // Not setSource(): that clears the grid and re-runs the search, which is
     // the opposite of restoring one. Only the parts that are state.
-    currentSource = params.src === 'animeunity' ? 'animeunity' : 'streamingcommunity';
-    document.getElementById('src-sc')?.classList.toggle('active', currentSource === 'streamingcommunity');
-    document.getElementById('src-au')?.classList.toggle('active', currentSource === 'animeunity');
-    if (input) input.placeholder = currentSource === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
+    currentSource = ['animeunity', 'youtube'].includes(params.src) ? params.src : 'streamingcommunity';
+    _markSourceButtons(currentSource);
+    _showYoutubeMode(currentSource === 'youtube');
     _kindFilter = params.type || '';
     _dubOnly = params.dub === '1';
     _browse = params.br ? {list: params.br, genre: params.g || '', country: params.c || '',
