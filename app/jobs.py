@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.config import VIDEOS_DIR, TMP_DIR, get_settings
 from app.progress import DownloadCancelledError, WebProgressBar
+from app import job_store
 
 
 def _get_library_path(type_: str) -> str:
@@ -108,10 +109,39 @@ class DownloadJob:
     # Its ticket while it waits for a download slot (None otherwise): the
     # waiting jobs start in ticket order, so the frontend can number the line.
     queue_seq: Optional[int] = None
+    # The folder under TMP_DIR holding this job's segments, when it is not the
+    # job's own id: a manual retry reuses the failed job's folder, so the
+    # segments already fetched are not fetched again.
+    tmp_id: Optional[str] = None
 
 
 # Rebuilt for every attempt: each belongs to one job id.
 _JOB_BOUND_KWARGS = ("temp_dir", "progress_factory", "cancel_event")
+
+# What a persisted record may set on a DownloadJob: the notification fields and
+# nothing else, so a record cannot change a job's status or identity.
+_RESUME_FIELDS = (
+    "title", "type", "phases", "user_id", "media_label", "year", "season",
+    "episode_number", "external_id", "batch_id", "batch_kind", "batch_label", "tmp_id",
+)
+
+
+def _tmp_dir(job: "DownloadJob") -> str:
+    return str(TMP_DIR / (job.tmp_id or job.job_id))
+
+
+def _fn_path(fn) -> str:
+    return f"{fn.__module__}:{fn.__qualname__}"
+
+
+def _resolve_fn(path: str):
+    """The inverse of _fn_path, limited to app.core: a record is ours to write, but
+    an import from a stored string should still reach only the download code."""
+    import importlib
+    module, _, name = path.partition(":")
+    if not module.startswith("app.core.") or not name:
+        raise ValueError(f"not a download function: {path!r}")
+    return getattr(importlib.import_module(module), name)
 
 
 def _worth_retrying(exc: Exception) -> bool:
@@ -499,11 +529,12 @@ class JobManager:
                 self._schedule_store.mark_fired(job.schedule_id)
         self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
         self._remember_call(job, fn, args, kwargs)
+        self._persist(job)
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
 
     def _build_call(self, type_: str, params: dict, job: DownloadJob):
         pf = self._make_progress_factory(job)
-        td = str(TMP_DIR / job.job_id)
+        td = _tmp_dir(job)
         if type_ == "film":
             from app.core.film import download_film
             return download_film, (params["id"], params["title"], params["domain"]), dict(
@@ -641,6 +672,7 @@ class JobManager:
             del self._jobs[job_id]
         if self._schedule_store is not None:
             self._schedule_store.remove_by_job_id(job_id)
+        shutil.rmtree(_tmp_dir(job), ignore_errors=True)
         self._broadcast({"type": "job_dismissed", "job_id": job_id})
         return True
 
@@ -699,10 +731,12 @@ class JobManager:
             user_id=old.user_id, media_label=old.media_label, year=old.year,
             season=old.season, episode_number=old.episode_number,
             external_id=old.external_id,
+            # Same folder: the segments the failed run fetched are reused.
+            tmp_id=old.tmp_id or old.job_id,
         )
         return self._submit_job(
             job, fn, *args, **kwargs,
-            temp_dir=str(TMP_DIR / job.job_id),
+            temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
         )
@@ -734,7 +768,21 @@ class JobManager:
                     # failed attempt's must not count toward the new one.
                     kwargs = {**kwargs, "progress_factory": self._make_progress_factory(job)}
         finally:
+            self._finish(job)
             self._notify_listeners(job)
+
+    def _finish(self, job: DownloadJob) -> None:
+        """Forget the persisted record once the job is terminal, and free its segments
+        unless it failed: a failed job keeps them so a retry can reuse them.
+        Also keeps the boot-time purge from treating a record-less folder as orphaned."""
+        if job.status not in ("done", "error", "cancelled"):
+            return
+        try:
+            job_store.delete(job.job_id)
+        except Exception:
+            logger.exception("Could not clear the persisted record of job %s", job.job_id)
+        if job.status != "error":
+            shutil.rmtree(_tmp_dir(job), ignore_errors=True)
 
     def _attempt(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Run the download once. True when it failed and should run again."""
@@ -767,14 +815,10 @@ class JobManager:
                     self._broadcast({"type": "job_retrying", "job": self._job_to_dict(job)})
                     return True
                 logger.exception(f"Job {job.job_id} failed: {e}")
-                job.status = "error"
+                # The message first: a reader that sees "error" must find it set.
                 job.error = str(e)
+                job.status = "error"
                 self._emit(job, {"type": "error", "message": str(e)})
-            finally:
-                tmp_path = TMP_DIR / job.job_id
-                if tmp_path.exists():
-                    shutil.rmtree(tmp_path, ignore_errors=True)
-                    logger.info("Cleaned up temp dir: %s", tmp_path)
         finally:
             if not job.slot_yielded:
                 self._slots.release()
@@ -786,10 +830,64 @@ class JobManager:
         wait. Its ticket is what orders the "In attesa" list."""
         self._broadcast({"type": "job_queued", "job_id": job.job_id, "queue_seq": job.queue_seq})
 
+    def _persist(self, job: DownloadJob) -> None:
+        """Write what a restart needs to run this job again (see app/job_store.py).
+
+        A job whose arguments do not survive JSON is still run; it just cannot be
+        resumed. Failing here must not fail the download itself.
+        """
+        fn, args, kwargs = job.call
+        record = {
+            "fn": _fn_path(fn),
+            "args": list(args),
+            "kwargs": kwargs,
+            "job": {f: getattr(job, f) for f in _RESUME_FIELDS},
+        }
+        try:
+            job_store.save(job.job_id, record)
+        except (TypeError, ValueError):
+            logger.warning("Job %s cannot be resumed after a restart: its arguments are not JSON", job.job_id)
+        except Exception:
+            logger.exception("Could not persist job %s", job.job_id)
+
+    def resume_interrupted(self) -> int:
+        """Run again every job a previous process left unfinished. Returns how many.
+
+        Segments already on disk are skipped by the downloader itself, so this
+        picks up where the job stopped. A job whose record can no longer be
+        rebuilt is dropped, and its folder goes with it at the next purge.
+        """
+        resumed = 0
+        for job_id, record in job_store.load_all():
+            try:
+                fn = _resolve_fn(record["fn"])
+                meta = {k: v for k, v in record["job"].items() if k in _RESUME_FIELDS}
+                if "phases" in meta:
+                    meta["phases"] = list(meta["phases"])
+                job = DownloadJob(job_id=job_id, status="queued",
+                                  created_at=datetime.now(timezone.utc), **meta)
+            except Exception:
+                logger.exception("Job %s could not be resumed; dropping it", job_id)
+                job_store.delete(job_id)
+                continue
+            # The stored arguments, not _on_current_domain(): that may fetch a token,
+            # and the lifespan does no network I/O. If the domain has rotated, the job
+            # fails and a retry moves it, the same as any other failure.
+            args = tuple(record["args"])
+            kwargs = {**record["kwargs"],
+                      "temp_dir": _tmp_dir(job),
+                      "progress_factory": self._make_progress_factory(job),
+                      "cancel_event": job.cancel_event}
+            logger.info("Resuming download job %s after a restart", job_id)
+            self._submit_job(job, fn, *args, **kwargs)
+            resumed += 1
+        return resumed
+
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         with self._lock:
             self._jobs[job.job_id] = job
         self._remember_call(job, fn, args, kwargs)
+        self._persist(job)
         self._broadcast({"type": "job_created", "job": self._job_to_dict(job)})
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
         return job.job_id
@@ -836,7 +934,7 @@ class JobManager:
             job, download_film,
             id_film, title, domain,
             output_dir=_get_library_path("film"),
-            temp_dir=str(TMP_DIR / job.job_id),
+            temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             year=year,
             cancel_event=job.cancel_event,
@@ -856,7 +954,7 @@ class JobManager:
             job, download_youtube,
             video_id, title,
             output_dir=download_dir(),
-            temp_dir=str(TMP_DIR / job.job_id),
+            temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
         )
@@ -884,7 +982,7 @@ class JobManager:
             job, download_episode,
             tv_id, eps, ep_index, domain, token, tv_name, season,
             output_dir=_get_library_path("tv"),
-            temp_dir=str(TMP_DIR / job.job_id),
+            temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
             year=year,
@@ -918,7 +1016,7 @@ class JobManager:
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
             output_dir=_get_library_path("anime"),
-            temp_dir=str(TMP_DIR / job.job_id),
+            temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
             year=year,

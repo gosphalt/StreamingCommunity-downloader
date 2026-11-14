@@ -21,6 +21,7 @@ from app.auth import setup_code
 from app.auth import users_router
 from app.auth.deps import AuthMiddleware
 from app.core import domain_recovery, youtube
+from app import job_store
 from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
 from app.watches import poller as watch_poller, router as watches_router
@@ -110,12 +111,13 @@ def check_writable_paths() -> None:
     )
 
 
-def purge_orphan_temp_dirs() -> int:
+def purge_orphan_temp_dirs(keep: frozenset = frozenset()) -> int:
     """Delete job folders a crash or power cut left in TMP_DIR.
 
-    Job state lives in memory, so after a restart no job can claim them and
-    their segments (gigabytes each) would stay forever. Only folders named like
-    a job id (a uuid) are touched: TMP_DIR is configurable and may be shared.
+    A job's record (app/job_store.py) is what lets a restart claim its folder:
+    ``keep`` holds those ids, and anything else is left from a job that is gone.
+    Their segments (gigabytes each) would otherwise stay forever. Only folders
+    named like a job id (a uuid) are touched: TMP_DIR is configurable and may be shared.
     """
     removed = 0
     try:
@@ -126,6 +128,8 @@ def purge_orphan_temp_dirs() -> int:
         try:
             uuid.UUID(entry.name)
         except ValueError:
+            continue
+        if entry.name in keep:
             continue
         if entry.is_dir() and not entry.is_symlink():
             shutil.rmtree(entry, ignore_errors=True)
@@ -140,8 +144,9 @@ async def lifespan(app: FastAPI):
     # First: a database the process cannot write fails migrations with SQLite's
     # "unable to open database file", which names neither the path nor the uid.
     check_writable_paths()
-    purge_orphan_temp_dirs()
     db.run_migrations()
+    # Folders of downloads about to be resumed are kept; the rest are orphans.
+    purge_orphan_temp_dirs(frozenset(job_id for job_id, _ in job_store.load_all()))
     setup_code.issue()
     auth_session.purge_expired()
     requests_service.register_job_listener()
@@ -157,11 +162,15 @@ async def lifespan(app: FastAPI):
     # Before anything can approve or complete a request: any row still
     # "approved" or "downloading" from a previous run has no in-memory worker
     # left, and never will — it needs recovering before the app is reachable.
-    requests_service.reconcile_orphaned_requests()
+    resumable = frozenset(job_id for job_id, _ in job_store.load_all())
+    requests_service.reconcile_orphaned_requests(keep_job_ids=resumable)
     store = ScheduleStore(SCHEDULE_FILE)
     job_manager.set_schedule_store(store)
     job_manager.load_scheduled_from_store()
     job_manager.set_loop(asyncio.get_event_loop())
+    # Last of the download wiring: the requests above must already know these
+    # downloads are coming back, and the job listeners must be registered.
+    job_manager.resume_interrupted()
     # Started last: a new episode found by the poller becomes an approval, which
     # submits a job, so the job manager has to be fully wired first.
     poller_task = asyncio.create_task(watch_poller.watch_poller_loop())

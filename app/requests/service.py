@@ -313,7 +313,7 @@ def register_job_listener():
 
 # ── Startup reconciliation ──────────────────────────────────────────────────────
 
-def reconcile_orphaned_requests() -> int:
+def reconcile_orphaned_requests(keep_job_ids: frozenset = frozenset()) -> int:
     """Recover requests an in-memory worker was still handling when the
     process last stopped — a crash, a deploy, a plain restart.
 
@@ -362,6 +362,9 @@ def reconcile_orphaned_requests() -> int:
         )
 
     for request in models.list_all((models.DOWNLOADING,)):
+        # Its download is being resumed (app/job_store.py): it is not lost.
+        if request.job_id in keep_job_ids:
+            continue
         failed = models.transition(
             request.id, models.FAILED,
             problem="interrotta: il pannello è stato riavviato durante il download",

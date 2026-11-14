@@ -30,17 +30,20 @@ def test_a_failed_job_runs_again_with_the_same_arguments():
         _wait(job)
         assert job.status == "error"
 
-        new_id = jm.retry(job.job_id)
+        old_id = job.job_id
+        new_id = jm.retry(old_id)
 
-        assert new_id and new_id != job.job_id
+        assert new_id and new_id != old_id
         # The failed entry is gone, so a second failure cannot leave a duplicate.
         assert jm.get(job.job_id) is None
         new = jm.get(new_id)
         _wait(new)
         assert new.status == "done"
         assert calls[1][:2] == (77, ["ita", "eng"])
-        # Arguments bound to a job are rebuilt for the new one, not reused.
-        assert new_id in calls[1][2]
+        # The folder is the failed job's, so the segments it fetched are reused.
+        assert old_id in calls[1][2]
+        assert new_id not in calls[1][2]
+        # The cancel event is rebuilt for the new job, not reused.
         assert calls[1][3] is new.cancel_event
         # The batch counted this episode already; the retry stands on its own.
         assert new.batch_id is None

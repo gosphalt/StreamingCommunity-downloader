@@ -534,6 +534,21 @@ _V11_FAVORITES = [
 ]
 
 
+_V12_DOWNLOAD_JOBS = [
+    # A download that has been started and not yet finished, kept so a restart
+    # can run it again. `record` is the JSON app/job_store.py writes. The row is
+    # deleted on success, cancel and final failure; what is left at boot is by
+    # definition interrupted.
+    """
+    CREATE TABLE download_job (
+        job_id     TEXT PRIMARY KEY,
+        record     TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+]
+
+
 Migration = list[str] | Callable[[sqlite3.Connection, bool], None]
 
 MIGRATIONS: list[Migration] = [
@@ -548,6 +563,7 @@ MIGRATIONS: list[Migration] = [
     _V9_FOLLOWER_LANGUAGES,
     _V10_LIBRARY_FOLDERS,
     _V11_FAVORITES,
+    _V12_DOWNLOAD_JOBS,
 ]
 
 

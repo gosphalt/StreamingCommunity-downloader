@@ -151,7 +151,8 @@ def test_lifespan_calls_reconciliation_before_serving_requests(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        main_module.requests_service, "reconcile_orphaned_requests", lambda: calls.append(1)
+        main_module.requests_service, "reconcile_orphaned_requests",
+        lambda keep_job_ids=frozenset(): calls.append(1)
     )
     monkeypatch.setattr(main_module, "check_writable_paths", lambda: None)
     monkeypatch.setattr(main_module.db, "run_migrations", lambda: None)
