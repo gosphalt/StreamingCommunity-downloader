@@ -13,6 +13,15 @@ Authentication is **opt-in, and the choice is made once in the setup wizard**, n
 environment variable: "Collega a Jellyfin" or "Continua senza Jellyfin", stored as the `auth_mode`
 setting in `panel.db`. Until it is answered the panel serves nothing but the wizard.
 
+## Diario di bordo (`DIARIO.md`)
+
+`DIARIO.md` nella radice del repository è il diario di bordo di lavoro, scritto in italiano. Leggilo
+all'inizio di ogni sessione per riprendere quello che è stato modificato, testato e deciso in
+precedenza. Dopo ogni modifica significativa (una correzione al codice, un nuovo test, una scelta di
+configurazione, un deploy o un riavvio), aggiungi una voce breve in cima, sotto un'intestazione con
+data: cosa è cambiato, i test eseguiti con il loro esito e ciò che resta aperto. Mantieni le voci
+brevi e correggi le righe diventate obsolete invece di aggiungere contraddizioni.
+
 ## Running the Project
 
 ```bash
