@@ -2,6 +2,20 @@
 
 Registro sintetico di miglioramenti, test e decisioni. Una voce per sessione, dalla più recente.
 
+## 2026-11-15 (tempo di esecuzione dei download)
+
+- **Modifica:** `app/jobs.py`: ogni job registra il tempo di esecuzione. Il cronometro parte alla prima assegnazione di uno slot e si ferma quando il job è terminale, quindi l'attesa in coda non conta. Il tempo è nel log (`Job <id> done after N s`) e nell'API come `run_seconds`. La card dei download mostra "Completato in 2h 26m" (`fmtEta` di `core.js`).
+- **Test:** `tests/test_job_run_time.py` (2 test). Suite completa: 1157 passati, 0 falliti.
+- **Aperto:** il tempo non è persistito: dopo un riavvio i job ripresi ripartono da zero. Le durate dei download già finiti prima della modifica non esistono.
+
+## 2026-11-15 (riavvio del servizio dopo il fix audio)
+
+- **Riavvio:** `sudo systemctl restart scpanel.service` alle 18:03:21, con nuovo PID 36177 attivo alle 18:03:27. Il processo col vecchio codice è stato fermato.
+- **Effetto sul download:** lo stop è durato oltre i 5 secondi di `timeout_graceful_shutdown` e ha ucciso il join FFmpeg in corso del "Ritorno del re" (circa 2 h 26 min di audio su 3 h 20). Il file parziale è stato rimosso. Il job è ripreso automaticamente e sta riscaricando i 3015 segmenti video, perché quelli temporanei non c'erano più. Il join ora copia l'audio.
+- **Altri job ripresi:** `3e56a69b` e `70580ab6`, non verificati uno per uno.
+- **Test:** nessuno. Il riavvio è una verifica operativa.
+- **Aperto:** esito del "Ritorno del re" da verificare dall'utente. Un riavvio con un join in corso fa perdere quel lavoro: il limite di 5 secondi in `main.py` interrompe anche FFmpeg. Da valutare se alzarlo o rendere il join interrompibile senza perdita.
+
 ## 2026-11-15 (audio copiato di nuovo nel join)
 
 - **Causa:** il fix `5e8cbc5` (copia dell'audio nel join) era solo sul branch `fix/copy-audio-on-join`, mai unito a `main`. Il commit `fbce269` (scelta del container) su `main` ha rimesso `aac` e `aresample` in `JOIN_COMMON`. Il download di "Il ritorno del re" lo ha pagato con un join audio di oltre 30 minuti.

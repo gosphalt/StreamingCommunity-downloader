@@ -72,6 +72,10 @@ class DownloadJob:
     # True while a paused download has handed its slot back.
     slot_yielded: bool = False
     gate: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # Monotonic clock at the first slot grant, and the total seconds once the job
+    # is terminal. Queue wait is excluded: this is time the download took to run.
+    run_started: Optional[float] = field(default=None, repr=False)
+    run_seconds: Optional[float] = None
 
     # Set when this job is one episode of a season or series asked for in one go,
     # so the notification can be a single summary instead of one per episode.
@@ -361,6 +365,7 @@ class JobManager:
             "type": job.type,
             "status": job.status,
             "created_at": job.created_at.isoformat(),
+            "run_seconds": job.run_seconds,
             "scheduled_at": job.scheduled_at.isoformat() if job.scheduled_at else None,
             "schedule_id": job.schedule_id,
             "error": job.error,
@@ -792,6 +797,9 @@ class JobManager:
         Also keeps the boot-time purge from treating a record-less folder as orphaned."""
         if job.status not in ("done", "error", "cancelled"):
             return
+        if job.run_started is not None:
+            job.run_seconds = round(time.monotonic() - job.run_started, 1)
+            logger.info("Job %s %s after %.1f s", job.job_id, job.status, job.run_seconds)
         try:
             job_store.delete(job.job_id)
         except Exception:
@@ -810,6 +818,8 @@ class JobManager:
             return False
         try:
             job.status = "running"
+            if job.run_started is None:
+                job.run_started = time.monotonic()
             self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
             try:
