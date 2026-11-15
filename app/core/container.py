@@ -60,14 +60,13 @@ EXTERNAL = "external"
 SUBTITLE_MODES = (EMBED, EXTERNAL)
 DEFAULT_SUBTITLE_MODE = EMBED
 
-# Applied to every join regardless of container: the video is copied, the audio
-# is normalised to AAC, and both are native to MKV and MP4 alike. Only the
-# muxer flags merged in on top of this differ.
+# Applied to every join regardless of container: video and audio are both copied,
+# since the source is already H.264 + AAC and native to MKV and MP4 alike. Only
+# the muxer flags merged in on top of this differ. Re-encoding AAC to AAC cost
+# minutes per track and lost quality for nothing.
 JOIN_COMMON: dict[str, str] = {
     "c:v": "copy",
-    "c:a": "aac",
-    "b:a": "192k",
-    "af": "aresample=async=1000",
+    "c:a": "copy",
 }
 
 
