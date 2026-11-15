@@ -5,6 +5,7 @@ import time
 
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 from app.core.headers import sanitize_filename
 
@@ -205,14 +206,27 @@ def _post_archive(body: dict):
     """
     global _csrf
     scraper = _get_scraper()
-    url = f"https://{host()}/archivio/get-animes"
 
-    r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
+    def post(url: str):
+        # shortcut: one redirect hop, re-POSTed by hand, because requests turns a
+        # redirected POST into a GET and the archive answers that with 405. Upgrade
+        # if the source ever chains more than one redirect.
+        r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()),
+                         timeout=20, allow_redirects=False)
+        if r.is_redirect and r.headers.get("Location"):
+            url = urljoin(url, r.headers["Location"])
+            logger.info("AnimeUnity redirected the archive search to %s", url)
+            r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()),
+                             timeout=20, allow_redirects=False)
+        return r
+
+    url = f"https://{host()}/archivio/get-animes"
+    r = post(url)
     if r.status_code in (403, 419):
         logger.info("AnimeUnity refused the CSRF token (HTTP %d), renewing it",
                     r.status_code)
         _csrf = None
-        r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
+        r = post(url)
     return r
 
 

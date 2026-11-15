@@ -391,7 +391,7 @@ function _buildJobCard(j) {
 // misreads the first title that contains something like S01 itself.
 
 let _dlFilter = 'all';
-const _dlCollapsed = new Set();   // batch_id of the groups the user folded away
+const _dlExpanded = new Set();   // batch_id of the groups the user opened; collections start folded
 
 // "In corso" is what holds a download slot right now; "In attesa" is what is
 // lined up for one (#26). They used to share one bucket, so twenty episodes
@@ -484,7 +484,7 @@ function _buildJobGroup(batchId, label, jobs) {
   const counts = _bucketCounts(all);
   const count = jobs.length === all.length
     ? String(all.length) : `${jobs.length} di ${all.length}`;
-  const collapsed = _dlCollapsed.has(batchId);
+  const collapsed = !_dlExpanded.has(batchId);
   const summary = [
     counts.running ? `<span class="jg-n jg-live">${counts.running} in corso</span>` : '',
     counts.waiting ? `<span class="jg-n jg-wait">${counts.waiting} in attesa</span>` : '',
@@ -506,8 +506,8 @@ function _buildJobGroup(batchId, label, jobs) {
 }
 
 function toggleJobGroup(batchId) {
-  if (_dlCollapsed.has(batchId)) _dlCollapsed.delete(batchId);
-  else _dlCollapsed.add(batchId);
+  if (_dlExpanded.has(batchId)) _dlExpanded.delete(batchId);
+  else _dlExpanded.add(batchId);
   renderAllJobCards();
 }
 
