@@ -823,13 +823,27 @@ class M3U8_Segments:
         # parameter is a third thing every call site could get wrong.
         # movflags is mov/mp4-private — handing it to the matroska muxer is not
         # ignored, it is fatal, and it would fail after every byte is fetched.
-        try:
-            ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
-                ffmpeg_file_arg(output_filename),
-                **container.join_options(output_filename),
-            ).overwrite_output().run(cmd=get_ffmpeg_exe(), capture_stdout=True, capture_stderr=True)
-        except ffmpeg.Error as e:
-            stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
+        proc = ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
+            ffmpeg_file_arg(output_filename),
+            **container.join_options(output_filename),
+        ).overwrite_output().run_async(cmd=get_ffmpeg_exe(), pipe_stdout=True, pipe_stderr=True)
+        # run() cannot be interrupted, so a cancelled download kept FFmpeg busy for
+        # minutes. The pipes are drained by a thread: an unread stderr would fill and block FFmpeg.
+        proc.stderr_text = None
+
+        def drain():
+            proc.stderr_text = proc.communicate()[1]
+
+        drained = threading.Thread(target=drain, daemon=True)
+        drained.start()
+        while drained.is_alive():
+            if self._cancel and self._cancel.is_set():
+                proc.kill()
+                drained.join()
+                raise DownloadCancelledError("Download annullato dall'utente")
+            drained.join(0.5)
+        if proc.returncode:
+            stderr = (proc.stderr_text or b"").decode(errors="replace") or "(no stderr)"
             if len(stderr) > 500:
                 stderr = f"...{stderr[-300:]}"
             logger.error("FFmpeg join stderr: %s", stderr)
