@@ -2,6 +2,14 @@
 
 Registro sintetico di miglioramenti, test e decisioni. Una voce per sessione, dalla più recente.
 
+## 2026-11-15 (audio copiato di nuovo nel join)
+
+- **Causa:** il fix `5e8cbc5` (copia dell'audio nel join) era solo sul branch `fix/copy-audio-on-join`, mai unito a `main`. Il commit `fbce269` (scelta del container) su `main` ha rimesso `aac` e `aresample` in `JOIN_COMMON`. Il download di "Il ritorno del re" lo ha pagato con un join audio di oltre 30 minuti.
+- **Modifica:** cherry-pick di `5e8cbc5` su `main` (commit locale `710d7dd`, non pushato): `JOIN_COMMON` torna a `"c:a": "copy"`, con il test `test_the_join_copies_the_audio_never_reencodes_it`.
+- **Test:** `tests/test_output_container.py`: 35 passati.
+- **CLAUDE.md:** la regola "video e audio sempre copiati" era già scritta e corretta. Il codice ora la rispetta. Nessuna modifica al file.
+- **Aperto:** commit di questa voce e push di `710d7dd` in attesa di autorizzazione. Il processo del pannello avviato alle 17:19 ha ancora il vecchio codice: il fix vale dal prossimo riavvio, da fare senza download in corso.
+
 ## 2026-11-15 (ponytail-audit, due giri)
 
 - **Bug:** `files._batch_move_sync` creava in silenzio la cartella di destinazione se non esisteva (un typo creava una cartella nuova). Ora la rifiuta come lo spostamento singolo. Test nuovo, verificato rosso sul codice precedente.
