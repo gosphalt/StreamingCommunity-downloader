@@ -92,6 +92,13 @@ def test_the_join_is_otherwise_identical():
     assert mkv["c:v"] == "copy"
 
 
+def test_the_join_copies_the_audio_never_reencodes_it():
+    """The source is already AAC; re-encoding it was minutes of CPU for lower quality."""
+    opts = container.join_options("/lib/Film.mkv")
+    assert opts["c:a"] == "copy"
+    assert "af" not in opts and "b:a" not in opts
+
+
 def test_the_temp_audio_files_are_mp4_whatever_the_setting_says():
     """They are genuinely mp4, so the options come from the name being written,
     not from the configured container."""
