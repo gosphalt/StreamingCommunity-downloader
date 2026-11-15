@@ -1,15 +1,13 @@
 import logging
-import os
 from urllib.parse import unquote, quote
 
 import requests
 from bs4 import BeautifulSoup
 
-from app.core.headers import get_headers, sanitize_filename
-from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
+from app.core.headers import get_headers
+from app.core.m3u8 import download_m3u8, fetch_master_languages
 from app.core.page import get_localized, site_url
 from app.core._shared import (
-    MissingAudioTrackError,
     StreamSource,
     resolve_stream,
     _fetch_vixcloud_embed,
@@ -19,7 +17,7 @@ from app.core._shared import (
     embed_referer,
     apply_video_host,
 )
-from app.core.paths import episode_path, fmt_ep  # noqa: F401  (fmt_ep re-exported)
+from app.core.paths import fmt_ep  # noqa: F401  (fmt_ep re-exported)
 
 logger = logging.getLogger(__name__)
 

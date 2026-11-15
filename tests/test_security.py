@@ -165,3 +165,18 @@ def test_image_proxy_refuses_svg_and_oversize(monkeypatch):
         images._fetch_image("example.com", "a.jpg")
     monkeypatch.setattr(images.requests, "get", lambda *a, **k: _Resp("image/jpeg", b"123"))
     assert images._fetch_image("example.com", "a.jpg") == (b"123", "image/jpeg")
+
+
+# ── The CSRF check compares bytes: a non-ASCII header must be refused, not crash ──
+
+def test_a_non_ascii_csrf_header_is_refused_with_403_not_500(client, signed_in):
+    response = client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-Token": "tökén".encode("latin-1")},
+    )
+    assert response.status_code == 403
+
+
+def test_the_right_csrf_token_still_passes(client, signed_in):
+    response = client.post("/api/auth/logout", headers={"X-CSRF-Token": signed_in})
+    assert response.status_code != 403

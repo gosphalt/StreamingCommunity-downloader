@@ -113,7 +113,7 @@ class JellyfinClient:
             headers["X-Forwarded-For"] = self.client_ip
         return headers
 
-    def _request(self, method: str, path: str, *, json=None, authenticated=True):
+    def _request(self, method: str, path: str, *, json=None):
         """Issue a request, retrying once without X-Forwarded-For on failure.
 
         Jellyfin sessions record an IP. Without X-Forwarded-For the server logs

@@ -3,7 +3,6 @@ import logging
 import subprocess
 
 import requests
-import ffmpeg
 
 from app.core import container
 from app.core.ffmpeg_path import ffmpeg_file_arg, get_ffmpeg_exe

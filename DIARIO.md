@@ -2,6 +2,15 @@
 
 Registro sintetico di miglioramenti, test e decisioni. Una voce per sessione, dalla più recente.
 
+## 2026-11-15 (ponytail-audit, due giri)
+
+- **Bug:** `files._batch_move_sync` creava in silenzio la cartella di destinazione se non esisteva (un typo creava una cartella nuova). Ora la rifiuta come lo spostamento singolo. Test nuovo, verificato rosso sul codice precedente.
+- **Test:** `/move-batch` e `/delete-batch` non avevano test. Aggiunti 3 test in `tests/test_files_root.py` (destinazione mancante, spostamento riuscito, percorso che esce dalla libreria).
+- **Lean:** rimossi import e variabili inutilizzati in 9 file dell'app (pyflakes), il parametro `authenticated` mai usato in `app/auth/jellyfin.py`.
+- **Sicurezza (irrobustimento):** il confronto del token CSRF in `app/auth/deps.py` usa `hmac.compare_digest` sui byte, come gli altri confronti del codice. Il codice precedente non andava in crash con header non ASCII: il test nuovo in `tests/test_security.py` protegge il codice attuale.
+- **Test:** suite completa 1154 passati, 0 falliti.
+- **Aperto:** test non committati. Import inutilizzati nei test (circa 15). Lo spostamento in blocco di un link simbolico sposta il file a cui punta, non il link: ipotesi, non provata.
+
 ## 2026-11-15 (test di `test_search_sources.py`)
 
 - **Causa:** `app/core/animeunity.py` legge `r.is_redirect` e `r.headers` (commit `ae8c494`), ma il fake `_ArchiveResponse` del test non li aveva. Il codice di produzione è corretto.

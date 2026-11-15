@@ -1,7 +1,6 @@
 import logging
 import os
 import random
-import sys
 import shutil
 import time
 import threading
@@ -1216,7 +1215,7 @@ def _download_m3u8(
             audio_track_urls=audio_track_urls,
             subtitle_track_urls=subtitle_track_urls,
         ).start()
-    except (DownloadCancelledError, Exception) as exc:
+    except (DownloadCancelledError, Exception):
         # Remove subtitle files already written, wherever they got to: they are
         # downloaded into temp, but the external mode moves them beside the
         # video, and a failure can land on either side of that move.

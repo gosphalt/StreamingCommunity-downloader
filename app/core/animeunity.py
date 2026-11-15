@@ -1,13 +1,11 @@
 import json
 import logging
-import re
 import time
 
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-from app.core.headers import sanitize_filename
 
 logger = logging.getLogger(__name__)
 

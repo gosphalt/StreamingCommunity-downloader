@@ -1,10 +1,9 @@
 import logging
-import os
 
 import requests
 from bs4 import BeautifulSoup
 
-from app.core.headers import get_headers, sanitize_filename
+from app.core.headers import get_headers
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
 from app.core.paths import film_path
 from app.core._shared import (

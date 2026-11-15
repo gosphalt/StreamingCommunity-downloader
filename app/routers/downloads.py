@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request as HttpRequest
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app import downloads_notify

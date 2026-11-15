@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.auth import models, session as sessions
-from app.auth.deps import client_ip, current_user, require
+from app.auth.deps import client_ip, require
 from app.auth.jellyfin import JellyfinClient, JellyfinError, is_administrator
-from app.auth.permissions import ALL_PERMISSIONS, Permission, from_names, sanitize, to_names
+from app.auth.permissions import ALL_PERMISSIONS, Permission, sanitize, to_names
 
 logger = logging.getLogger(__name__)
 router = APIRouter(

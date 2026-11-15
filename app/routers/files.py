@@ -343,6 +343,9 @@ def _batch_move_sync(paths: list[str], dest_dir_path: str) -> list[dict]:
     """Move multiple paths within VIDEOS_DIR (blocking, runs in thread)."""
     base = VIDEOS_DIR.resolve()
     dest_dir = (base / dest_dir_path).resolve() if dest_dir_path else base
+    if not dest_dir.exists():
+        # Same rule as the single move: a typo in the folder name must not create a new folder.
+        return [{"path": p, "ok": False, "error": "Cartella di destinazione non esiste"} for p in paths]
     results = []
     for p in paths:
         try:
@@ -361,7 +364,6 @@ def _batch_move_sync(paths: list[str], dest_dir_path: str) -> list[dict]:
             if dest.exists():
                 results.append({"path": p, "ok": False, "error": f"'{source.name}' esiste già nella destinazione"})
                 continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(dest))
             results.append({"path": p, "ok": True, "moved_to": str(dest)})
         except Exception as e:

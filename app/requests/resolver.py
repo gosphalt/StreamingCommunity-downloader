@@ -531,7 +531,7 @@ def available_tracks(request: models.Request) -> dict:
         return animeunity.get_episode_languages(episode["id"])
 
     from app.core.film import get_film_languages
-    from app.core.tv import get_episode_languages, get_info_season, get_token
+    from app.core.tv import get_episode_languages, get_token
 
     domain = current_domain()
     if request.media_type == FILM:

@@ -8,6 +8,7 @@ Authorisation is per-route, through ``require(...)``. Hiding a button in the UI
 is not authorisation — every operation is checked here, server-side.
 """
 
+import hmac
 import logging
 
 from fastapi import HTTPException, Request
@@ -143,7 +144,10 @@ class AuthMiddleware:
 
         if request.method not in SAFE_METHODS:
             supplied = request.headers.get(sessions.CSRF_HEADER, "")
-            if not supplied or supplied != scope["state"]["csrf_token"]:
+            # Bytes, not str: compare_digest raises TypeError on non-ASCII text, and a header can carry it.
+            if not supplied or not hmac.compare_digest(
+                supplied.encode(), scope["state"]["csrf_token"].encode()
+            ):
                 logger.warning("CSRF token mismatch on %s %s", request.method, path)
                 await JSONResponse(
                     {"detail": "Token CSRF mancante o non valido"},

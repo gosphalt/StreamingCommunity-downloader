@@ -70,3 +70,25 @@ def test_deleting_a_symlink_removes_the_link_not_its_target(library):
     (library / "link").symlink_to(library / "real", target_is_directory=True)
     assert files._batch_delete_sync(["link"])[0]["ok"] is True
     assert not (library / "link").is_symlink() and (library / "real" / "y.mkv").exists()
+
+
+def test_a_batch_move_to_a_missing_folder_is_refused_and_creates_nothing(library):
+    result = files._batch_move_sync(["a/x.mkv"], "typo-dir")
+    assert result[0]["ok"] is False
+    assert not (library / "typo-dir").exists()
+    assert (library / "a" / "x.mkv").exists()
+
+
+def test_a_batch_move_into_an_existing_folder_moves_the_file(library):
+    (library / "b").mkdir()
+    assert files._batch_move_sync(["a/x.mkv"], "b")[0]["ok"] is True
+    assert (library / "b" / "x.mkv").exists()
+
+
+def test_a_batch_path_that_climbs_out_of_the_library_touches_nothing_outside(library, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "secret.mkv"
+    outside.write_text("keep")
+    rel = f"../{outside.parent.name}/secret.mkv"
+    assert files._batch_delete_sync([rel])[0]["ok"] is False
+    assert files._batch_move_sync([rel], "a")[0]["ok"] is False
+    assert outside.read_text() == "keep"
