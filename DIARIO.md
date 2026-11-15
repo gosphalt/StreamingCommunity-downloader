@@ -2,6 +2,13 @@
 
 Registro sintetico di miglioramenti, test e decisioni. Una voce per sessione, dalla più recente.
 
+## 2026-11-15 (riavvio bloccato dagli stream SSE)
+
+- **Causa:** `/api/progress/stream` e `/api/progress/{job_id}` sono cicli infiniti (keepalive ogni 25-30 s). Una scheda aperta tiene una connessione, e uvicorn, all'arresto, aspetta che si chiuda. Il riavvio è durato 90 s, poi systemd ha forzato con SIGKILL.
+- **Modifica:** `main.py`: `uvicorn.run(..., timeout_graceful_shutdown=5)`. Dopo 5 s uvicorn chiude le connessioni residue e poi esegue lo shutdown del lifespan.
+- **Test:** server di prova con stream infinito. Senza limite lo stop ha impiegato 39 s (aspettava il client); con limite 5,4 s. Sul servizio reale: il primo riavvio (con il vecchio `main.py` ancora in memoria) ha impiegato 90 s, il secondo meno di 1 s con shutdown completo.
+- **Aperto:** modifica non committata. Lo stream è stato verificato solo su un server di prova, non su un browser collegato al panel. I 16 test rossi in `tests/test_search_sources.py` restano.
+
 ## 2026-11-15 (annullamento del join e rilascio della chiamata)
 
 - **Modifica:** `app/core/m3u8.py`, `M3U8_Segments.join()`: FFmpeg ora parte con `run_async` e viene atteso a passi di 0,5 s. Un annullamento lo uccide subito (`DownloadCancelledError`), prima `run()` non si poteva interrompere. stderr è letto da un thread, altrimenti il buffer si riempie e blocca FFmpeg.
