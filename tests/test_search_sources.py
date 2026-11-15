@@ -243,14 +243,19 @@ _AU_HOME = ('<html><head><meta name="csrf-token" content="tok-1">'
 
 
 class _ArchiveResponse:
-    def __init__(self, payload=None, status_code=200, text=""):
+    def __init__(self, payload=None, status_code=200, text="", headers=None):
         self._payload = payload
         self.status_code = status_code
         self.text = text
+        self.headers = headers or {}
 
     @property
     def ok(self):
         return 200 <= self.status_code < 300
+
+    @property
+    def is_redirect(self):  # as requests.Response defines it
+        return self.status_code in (301, 302, 303, 307, 308) and "Location" in self.headers
 
     def json(self):
         if self._payload is None:
@@ -315,6 +320,17 @@ def test_the_archive_endpoint_is_used_not_livesearch(au):
 
     assert fake.posts[0][0].endswith("/archivio/get-animes")
     assert not any("livesearch" in url for url, *_ in fake.posts)
+
+
+def test_a_redirected_archive_post_is_sent_again_to_the_new_location(au):
+    """requests would turn the redirected POST into a GET (405), so the hop is made by hand."""
+    moved = _ArchiveResponse(status_code=302, headers={"Location": "/archivio/new-home"})
+    fake = au(moved, _records(_record(7)))
+
+    results = animeunity.search("x")
+
+    assert fake.posts[1][0].endswith("/archivio/new-home")
+    assert len(results) == 1  # the record served by the new location, not an empty answer
 
 
 def test_the_offset_is_thirty_per_page(au):
