@@ -22,6 +22,9 @@ def _job(name, seq, priority=0):
 def _line(*jobs):
     slots = DownloadSlots(1)
     slots._line.extend(jobs)
+    # Only a job with a thread waiting can be granted a slot; these tests stand in for those threads.
+    for j in jobs:
+        slots._waiters[id(j)] = threading.Condition(slots._cond)
     return slots
 
 

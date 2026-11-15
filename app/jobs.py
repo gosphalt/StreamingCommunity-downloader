@@ -203,7 +203,12 @@ class DownloadSlots:
     def _next(self) -> Optional["DownloadJob"]:
         """The job that gets the next free slot. Caller holds the lock."""
         if self._head_stale:
-            ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
+            # Only a job with a thread waiting can take a slot. One still in the
+            # executor's queue has a ticket but no thread, and as head it would
+            # hold the line for everyone. Tickets follow submission, and threads
+            # start in submission order, so the threaded head is still the lowest ticket.
+            ready = [j for j in self._line
+                     if id(j) in self._waiters and (not j.pause_event.is_set() or j.cancel_event.is_set())]
             self._head = max(ready, key=self._order_key, default=None)
             self._head_stale = False
         return self._head
@@ -255,8 +260,9 @@ class DownloadSlots:
             self._changed()
             return changed
 
-    def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
-        """Wait for a slot. False when the job was cancelled while waiting."""
+    def enqueue(self, job: "DownloadJob", on_queued=None) -> None:
+        """Give a job its place in the line. Done at submit, not when its thread
+        starts: with more jobs than threads the rest had no ticket and no position."""
         with self._cond:
             self._tickets += 1
             job.queue_seq = self._tickets
@@ -264,8 +270,17 @@ class DownloadSlots:
             self._head_stale = True
         if on_queued is not None:
             on_queued(job)
+
+    def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
+        """Wait for a slot. False when the job was cancelled while waiting. A job
+        already in the line keeps its ticket; one back from a pause or a retry joins again."""
+        with self._cond:
+            queued = job in self._line
+        if not queued:
+            self.enqueue(job, on_queued)
         with self._cond:
             waiter = self._waiters[id(job)] = threading.Condition(self._cond)
+            self._head_stale = True
             try:
                 while not (self._busy < self._limit and self._next() is job):
                     if job.cancel_event.is_set():
@@ -530,6 +545,7 @@ class JobManager:
         self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
         self._remember_call(job, fn, args, kwargs)
         self._persist(job)
+        self._slots.enqueue(job, on_queued=self._announce_queued)
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
 
     def _build_call(self, type_: str, params: dict, job: DownloadJob):
@@ -889,6 +905,7 @@ class JobManager:
         self._remember_call(job, fn, args, kwargs)
         self._persist(job)
         self._broadcast({"type": "job_created", "job": self._job_to_dict(job)})
+        self._slots.enqueue(job, on_queued=self._announce_queued)
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
         return job.job_id
 
