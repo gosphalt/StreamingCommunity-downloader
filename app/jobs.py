@@ -799,6 +799,9 @@ class JobManager:
             logger.exception("Could not clear the persisted record of job %s", job.job_id)
         if job.status != "error":
             shutil.rmtree(_tmp_dir(job), ignore_errors=True)
+            # Only a failed job can be retried, so the call (its arguments: a whole
+            # season's episode list, for a batch) is kept just for those.
+            job.call = None
 
     def _attempt(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Run the download once. True when it failed and should run again."""
@@ -852,6 +855,8 @@ class JobManager:
         A job whose arguments do not survive JSON is still run; it just cannot be
         resumed. Failing here must not fail the download itself.
         """
+        if job.call is None:  # finished: _finish dropped the call, and there is nothing left to resume
+            return
         fn, args, kwargs = job.call
         record = {
             "fn": _fn_path(fn),
