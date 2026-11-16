@@ -238,28 +238,13 @@ def test_a_good_page_reports_its_version(monkeypatch, sc):
 
 from app.core import animeunity  # noqa: E402
 
-_AU_HOME = ('<html><head><meta name="csrf-token" content="tok-1">'
-            '</head><body></body></html>')
 
-
-class _ArchiveResponse:
-    def __init__(self, payload=None, status_code=200, text="", headers=None):
-        self._payload = payload
-        self.status_code = status_code
-        self.text = text
-        self.headers = headers or {}
-
-    @property
-    def ok(self):
-        return 200 <= self.status_code < 300
-
-    @property
-    def is_redirect(self):  # as requests.Response defines it
-        return self.status_code in (301, 302, 303, 307, 308) and "Location" in self.headers
+class _Resp:
+    def __init__(self, text="", status_code=200, payload=None):
+        self.text, self.status_code, self._payload = text, status_code, payload
+        self.ok = status_code < 400
 
     def json(self):
-        if self._payload is None:
-            raise ValueError("not json")
         return self._payload
 
     def raise_for_status(self):
@@ -267,211 +252,157 @@ class _ArchiveResponse:
             raise requests.HTTPError(f"HTTP {self.status_code}")
 
 
-class _FakeScraper:
-    def __init__(self, replies):
-        self.gets, self.posts = [], []
-        self.replies = list(replies)
-
-    def get(self, url, **kwargs):
-        self.gets.append((url, kwargs))
-        return _ArchiveResponse(text=_AU_HOME)
-
-    def post(self, url, json=None, headers=None, **kwargs):
-        self.posts.append((url, json, headers))
-        assert self.replies, f"POST {len(self.posts)} is more than the test prepared"
-        return self.replies.pop(0)
+def _page(props):
+    """An Inertia page: the props in a data-page attribute, as the site serves it."""
+    payload = html.escape(json.dumps({"component": "Archive", "props": props}), quote=True)
+    return _Resp(text=f'<html><body><div id="app" data-page="{payload}"></div></body></html>')
 
 
-def _record(n, kind="TV", dub=0):
-    return {
-        "id": n, "slug": f"anime-{n}", "title_eng": f"Anime {n}", "type": kind,
-        "imageurl": f"https://cdn.animeunity.test/{n}.jpg", "episodes_count": 12,
-        "plot": "Una trama.", "genres": [{"name": "Azione"}, {"name": "Dramma"}],
-        "dub": dub, "score": "8.5", "date": "2023-01-05",
+class _Site:
+    """Answers the archive page and the episodes API from canned data."""
+
+    def __init__(self, rows=(), genres=(), episodes=()):
+        self.rows, self.genres, self.episodes = list(rows), list(genres), list(episodes)
+        self.gets = []
+
+    def get(self, url, params=None, **kwargs):
+        self.gets.append((url, dict(params or {})))
+        if url.endswith("/archive"):
+            return _page({"animes": {"data": self.rows}, "animeGenres": self.genres})
+        if "/api/anime/" in url:
+            start = int((params or {}).get("start", 1))
+            batch = [e for e in self.episodes if int(e["number"]) >= start][:120]
+            return _Resp(payload={"episodes": batch, "total": len(self.episodes),
+                                  "start": start, "tab_size": 120})
+        raise AssertionError(f"unexpected GET {url}")
+
+
+def _row(n, variants=(("jpn", "completed"),), **extra):
+    row = {
+        "id": n, "slug": f"anime-{n}", "title": f"Anime {n}", "title_ja": f"アニメ{n}",
+        "title_it": None, "type": "tv", "year": 2002, "season": "fall",
+        "default_status": "completed", "total_episodes": 12, "score": "8.5",
+        "plot": "Una trama.", "genres": [{"id": 1, "name": "Action"}],
+        "studios": [{"id": 8, "name": "Studio Pierrot"}],
+        "images": {"poster": f"https://img.test/{n}.jpg", "cover": None,
+                   "banner": f"https://img.test/b{n}.jpg"},
+        "variants": [{"language": lang, "status": status} for lang, status in variants],
     }
+    row.update(extra)
+    return row
 
 
-def _records(*records, status_code=200):
-    return _ArchiveResponse({"records": list(records)}, status_code=status_code)
+def _video(vid, lang, hidden=False):
+    return {"id": vid, "language": lang, "is_hidden": hidden, "runtime": 24}
 
 
 @pytest.fixture
-def au(monkeypatch):
-    """Build a fake scraper serving the given POST replies in order.
-
-    Both the scraper and the CSRF token are module globals that outlive a test,
-    so the fixture has to reach both.
-    """
-    monkeypatch.setattr(animeunity, "_csrf", None)
-
-    def build(*replies):
-        fake = _FakeScraper(replies)
-        monkeypatch.setattr(animeunity, "_get_scraper", lambda: fake)
-        return fake
-
-    return build
+def site(monkeypatch):
+    fake = _Site()
+    monkeypatch.setattr(animeunity, "_get_scraper", lambda: fake)
+    return fake
 
 
-def test_the_archive_endpoint_is_used_not_livesearch(au):
-    """/livesearch is capped at eight records by the source, for every query."""
-    fake = au(_records(_record(1)))
-
-    animeunity.search("x")
-
-    assert fake.posts[0][0].endswith("/archivio/get-animes")
-    assert not any("livesearch" in url for url, *_ in fake.posts)
+def test_search_asks_the_archive_page_with_the_query_and_page(site):
+    site.rows = [_row(1)]
+    animeunity.search("naruto", page=2)
+    url, params = site.gets[-1]
+    assert url.endswith("/archive")
+    assert params == {"query": "naruto", "page": 2}
 
 
-def test_a_redirected_archive_post_is_sent_again_to_the_new_location(au):
-    """requests would turn the redirected POST into a GET (405), so the hop is made by hand."""
-    moved = _ArchiveResponse(status_code=302, headers={"Location": "/archivio/new-home"})
-    fake = au(moved, _records(_record(7)))
-
-    results = animeunity.search("x")
-
-    assert fake.posts[1][0].endswith("/archivio/new-home")
-    assert len(results) == 1  # the record served by the new location, not an empty answer
+def test_filters_become_the_sources_own_parameters(site):
+    site.rows = [_row(1)]
+    animeunity.search("", media_type="OVA", dubbed=True, genre=37, year=2020,
+                      order="latest", status="completed")
+    assert site.gets[-1][1] == {"query": "", "page": 1, "language": "ita", "type": "ova",
+                                "genres[]": 37, "year": 2020, "sort_by": "latest",
+                                "status": "completed"}
 
 
-def test_the_offset_is_thirty_per_page(au):
-    fake = au(_records(), _records())
-
-    animeunity.search("x")
-    animeunity.search("x", page=3)
-
-    assert fake.posts[0][1]["offset"] == 0
-    assert fake.posts[1][1]["offset"] == 60
-
-
-def test_the_dub_filter_is_sent_only_when_asked(au):
-    fake = au(_records(), _records())
-
-    animeunity.search("x")
-    animeunity.search("x", dubbed=True)
-
-    assert "dubbed" not in fake.posts[0][1]
-    assert fake.posts[1][1]["dubbed"] == 1
+def test_a_record_becomes_a_card(site):
+    site.rows = [_row(7, variants=(("jpn", "completed"), ("ita", "ongoing")))]
+    card = animeunity.search("x")[0]
+    assert card["id"] == "7-anime-7"
+    assert card["name"] == "Anime 7"
+    assert card["media_type"] == "tv"
+    assert card["dubbed"] is True
+    assert card["poster"] == "https://img.test/7.jpg"
+    assert card["backdrop"] == "https://img.test/b7.jpg"
+    assert card["episodes_count"] == 12
+    assert card["release_date"] == "2002"
+    assert card["studio"] == "Studio Pierrot"
+    assert card["genres"] == ["Action"]
+    assert card["status"] == "completed"
+    assert card["original_name"] == "アニメ7"
 
 
-def test_the_kind_is_translated_to_the_sources_own_word(au):
-    """The wire says "movie"; AnimeUnity says "Movie"."""
-    fake = au(_records(), _records())
-
-    animeunity.search("x", media_type="movie")
-    animeunity.search("x", media_type="special")
-
-    assert fake.posts[0][1]["type"] == "Movie"
-    assert fake.posts[1][1]["type"] == "Special"
+def test_no_italian_variant_means_not_dubbed(site):
+    site.rows = [_row(1, variants=(("jpn", "completed"),))]
+    assert animeunity.search("x")[0]["dubbed"] is False
 
 
-def test_the_source_classification_comes_back_beside_the_type(au):
-    """type stays "anime" — the whole anime flow keys off it — and the source's
-    own word rides in media_type. Folding one into the other is what used to
-    label every anime film a TV series."""
-    au(_records(_record(1, kind="Movie")))
-
-    result = animeunity.search("x")[0]
-
-    assert result["type"] == "anime"
-    assert result["media_type"] == "Movie"
-
-
-def test_plot_and_genres_are_passed_through(au):
-    """The archive sends them with the search, so the detail panel costs nothing."""
-    au(_records(_record(1)))
-
-    result = animeunity.search("x")[0]
-
-    assert result["plot"] == "Una trama."
-    assert result["genres"] == ["Azione", "Dramma"]
-
-
-def test_genres_survive_an_odd_shape(au):
-    """Laravel casts them differently by row; a TypeError inside a search is not
-    an acceptable answer to that."""
-    plain, as_json, broken = _record(1), _record(2), _record(3)
-    plain["genres"] = ["Azione"]
-    as_json["genres"] = '[{"name": "Commedia"}]'
-    broken["genres"] = None
-    au(_records(plain, as_json, broken))
-
-    results = animeunity.search("x")
-
-    assert [r["genres"] for r in results] == [["Azione"], ["Commedia"], []]
-
-
-def test_the_dub_flag_is_passed_through(au):
-    au(_records(_record(1, dub=1), _record(2, dub=0)))
-
-    assert [r["dubbed"] for r in animeunity.search("x")] == [True, False]
-
-
-def test_no_results_is_an_empty_list_not_an_error(au):
-    """An anime the source does not have is not a failure of the source. This
-    used to raise, and reached the panel as a red box saying search had broken."""
-    au(_records())
-
+def test_an_empty_page_is_an_empty_list_not_an_error(site):
     assert animeunity.search("nothing at all") == []
 
 
-def test_the_poster_is_an_absolute_url(au):
-    """Unlike StreamingCommunity's bare filename: the frontend branches on it."""
-    au(_records(_record(1)))
-
-    assert animeunity.search("x")[0]["poster"] == "https://cdn.animeunity.test/1.jpg"
-
-
-def test_the_same_record_twice_is_one_card(au):
-    au(_records(_record(1), _record(1)))
-
+def test_the_same_record_twice_is_one_card(site):
+    site.rows = [_row(1), _row(1)]
     assert len(animeunity.search("x")) == 1
 
 
-def test_a_refused_status_is_reported(au):
-    au(_records(status_code=500))
-
-    with pytest.raises(RuntimeError, match="500"):
+def test_a_refused_page_is_reported(site, monkeypatch):
+    monkeypatch.setattr(site, "get", lambda url, **kw: _Resp(status_code=503))
+    with pytest.raises(RuntimeError, match="HTTP 503"):
         animeunity.search("x")
 
 
-# ── The CSRF token ────────────────────────────────────────────────────────────
-
-def test_a_stale_csrf_token_is_renewed_once(au):
-    """419 is Laravel saying the token expired. Fetching a new one and sending
-    the request again is re-authentication, not a retry."""
-    fake = au(_records(status_code=419), _records(_record(1)))
-
-    assert len(animeunity.search("x")) == 1
-    assert len(fake.posts) == 2, "renewed once, not retried in a loop"
-    assert len(fake.gets) == 2, "one home page for the first token, one for the new"
+def test_browse_options_reads_the_genres_from_the_archive_page(site):
+    site.genres = [{"id": 1, "name": "Action"}, {"id": 2, "name": "Adventure"}]
+    assert animeunity.browse_options() == {"genres": [
+        {"id": 1, "name": "Action"}, {"id": 2, "name": "Adventure"}]}
 
 
-def test_a_token_refused_twice_is_not_tried_a_third_time(au):
-    fake = au(_records(status_code=419), _records(status_code=419))
-
-    with pytest.raises(RuntimeError, match="419"):
-        animeunity.search("x")
-    assert len(fake.posts) == 2
-
-
-def test_the_csrf_token_is_not_refetched_per_search(au):
-    fake = au(_records(), _records())
-
-    animeunity.search("x")
-    animeunity.search("y")
-
-    assert len(fake.gets) == 1, "the token is good for a while and costs a page load"
-    assert fake.posts[1][2]["X-CSRF-TOKEN"] == "tok-1"
+def test_episodes_are_read_in_batches_of_120_by_first_number(site):
+    site.episodes = [{"id": n, "number": str(n), "videos": []} for n in range(1, 171)]
+    episodes = animeunity.get_episodes("112-black-clover")
+    assert [e["number"] for e in episodes][:1] == ["1"]
+    assert len(episodes) == 170
+    episode_calls = [(u, p["start"]) for u, p in site.gets if "/api/anime/" in u]
+    assert episode_calls == [("https://animeunity.cx/api/anime/112/episodes", 1),
+                             ("https://animeunity.cx/api/anime/112/episodes", 121)]
 
 
-def test_an_expired_token_is_refetched(au, monkeypatch):
-    fake = au(_records(), _records())
-    animeunity.search("x")
+def test_no_episodes_is_an_empty_list(site):
+    assert animeunity.get_episodes("112-black-clover") == []
 
-    monkeypatch.setattr(animeunity, "_now", lambda: animeunity.time.time() + 3600)
-    animeunity.search("y")
 
-    assert len(fake.gets) == 2
+def test_the_italian_video_is_picked_unless_another_language_is_asked():
+    ep = {"number": "1", "videos": [_video(10, "jpn"), _video(20, "ita")]}
+    assert animeunity._pick_video(ep)["id"] == 20
+    assert animeunity._pick_video(ep, ("jpn",))["id"] == 10
+
+
+def test_without_the_language_asked_the_first_video_is_used():
+    ep = {"number": "1", "videos": [_video(10, "jpn")]}
+    assert animeunity._pick_video(ep, ("ita",))["id"] == 10
+
+
+def test_hidden_videos_are_never_picked():
+    ep = {"number": "1", "videos": [_video(10, "ita", hidden=True), _video(20, "jpn")]}
+    assert animeunity._pick_video(ep)["id"] == 20
+    assert animeunity.get_episode_languages(ep) == {"audio": ["jpn"], "subtitles": []}
+
+
+def test_an_episode_with_no_video_is_an_error():
+    with pytest.raises(RuntimeError, match="no playable video"):
+        animeunity._pick_video({"number": "3", "videos": []})
+
+
+def test_the_languages_of_an_episode_are_its_videos_languages():
+    ep = {"number": "1", "videos": [_video(10, "jpn"), _video(20, "ita")]}
+    assert animeunity.get_episode_languages(ep) == {"audio": ["jpn", "ita"], "subtitles": []}
+
 
 
 # ── /api/search ───────────────────────────────────────────────────────────────
@@ -581,23 +512,6 @@ def test_browse_ranked_list_ignores_filters(monkeypatch):
     assert seen == {"path": "/browse/trending", "params": {}}
     with pytest.raises(ValueError):
         page.browse("example.test", list_name="nope")
-
-
-# ── AnimeUnity browse ─────────────────────────────────────────────────────────
-
-def test_animeunity_browse_sends_an_empty_title_and_the_sources_filters(monkeypatch):
-    seen = {}
-
-    class R:
-        ok = True
-        status_code = 200
-        def json(self): return {"records": []}
-
-    monkeypatch.setattr(animeunity, "_post_archive", lambda body: seen.update(body) or R())
-    animeunity.search("", page=2, media_type="ova", genre=37, year=2020,
-                      order="Più visti", status="In Corso")
-    assert seen == {"title": "", "offset": 30, "type": "OVA", "genres": [{"id": 37}],
-                    "year": 2020, "order": "Più visti", "status": "In Corso"}
 
 
 def test_browse_endpoint_routes_animeunity_and_refuses_its_kinds_for_sc(client, signed_in, monkeypatch):

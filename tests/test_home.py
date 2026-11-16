@@ -65,29 +65,26 @@ def sc(monkeypatch):
     return state
 
 
-def _au_record(n, kind="TV"):
-    return {"id": n, "slug": f"anime-{n}", "title_eng": f"Anime {n}", "type": kind,
-            "imageurl": f"https://cdn.animeunity.test/{n}.jpg", "episodes_count": 12}
+def _au_record(n, kind="tv"):
+    """A title as the home page's props carry it."""
+    return {"id": n, "slug": f"anime-{n}", "title": f"Anime {n}", "type": kind,
+            "total_episodes": 12, "images": {"poster": f"https://cdn.animeunity.test/{n}.jpg"}}
 
 
 def _au_home(latest_rows, featured):
-    items = html.escape(json.dumps({"data": latest_rows}), quote=True)
-    animes = html.escape(json.dumps(featured), quote=True)
-    return (f'<html><body><layout-items items-json="{items}"></layout-items>'
-            f'<the-carousel animes="{animes}"></the-carousel></body></html>')
+    """The props of the home page: the latest episodes and the carousel."""
+    return {"latestEpisodes": {"data": latest_rows}, "carouselAnimes": featured}
 
 
 @pytest.fixture
 def au(monkeypatch):
-    state = {"html": _au_home([], []), "calls": []}
+    state = {"props": _au_home([], []), "calls": []}
 
-    class _Scraper:
-        def get(self, url, **kwargs):
-            state["calls"].append(url)
-            return _Response(state["html"])
+    def fake_props():
+        state["calls"].append("/")
+        return state["props"]
 
-    monkeypatch.setattr(animeunity, "_get_scraper", lambda: _Scraper())
-    monkeypatch.setattr(animeunity, "_csrf", None)
+    monkeypatch.setattr(animeunity, "home_props", fake_props)
     return state
 
 
@@ -144,7 +141,7 @@ def test_an_empty_slider_is_not_a_shelf(sc):
 # ── AnimeUnity shelves ────────────────────────────────────────────────────────
 
 def test_the_anime_front_page_gives_both_lists(au):
-    au["html"] = _au_home([{"anime": _au_record(1)}], [_au_record(2), _au_record(3)])
+    au["props"] = _au_home([{"episode": {"anime": _au_record(1)}}], [_au_record(2), _au_record(3)])
 
     result = home.shelves("animeunity", "www.animeunity.test")
 
@@ -155,8 +152,9 @@ def test_the_anime_front_page_gives_both_lists(au):
 
 def test_the_latest_episode_list_is_deduplicated_by_anime(au):
     """Two new episodes of the same series are two rows and one card."""
-    au["html"] = _au_home(
-        [{"anime": _au_record(1)}, {"anime": _au_record(1)}, {"anime": _au_record(2)}], [])
+    au["props"] = _au_home(
+        [{"episode": {"anime": _au_record(1)}}, {"episode": {"anime": _au_record(1)}},
+         {"episode": {"anime": _au_record(2)}}], [])
 
     items = home.shelves("animeunity", "www.animeunity.test")[0]["items"]
 
@@ -165,13 +163,12 @@ def test_the_latest_episode_list_is_deduplicated_by_anime(au):
 
 def test_an_anime_poster_is_an_absolute_url(au):
     """The other half of the dual poster shape, pinned on this path too."""
-    au["html"] = _au_home([], [_au_record(1)])
+    au["props"] = _au_home([], [_au_record(1)])
 
     item = home.shelves("animeunity", "www.animeunity.test")[0]["items"][0]
 
     assert item["poster"] == "https://cdn.animeunity.test/1.jpg"
-    assert item["type"] == "anime" and item["media_type"] == "TV"
-
+    assert item["type"] == "anime" and item["media_type"] == "tv"
 
 def test_a_front_page_with_neither_list_is_no_shelves(au):
     au["html"] = "<html><body>nothing here</body></html>"

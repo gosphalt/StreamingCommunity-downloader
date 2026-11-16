@@ -1,10 +1,8 @@
 import json
 import logging
-import time
 
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 
 
 logger = logging.getLogger(__name__)
@@ -15,33 +13,11 @@ def host() -> str:
     return configured_animeunity_host()
 
 
-BATCH_SIZE = 120
-
-# What /archivio/get-animes answers per call. Not ours to choose — it is the
-# source's page size, and what one "Carica altri" is worth.
-ARCHIVE_PAGE = 30
-
 # A ceiling on what one call may normalise, for the day the source answers with
 # more than a page.
 MAX_RESULTS = 60
 
-# The panel's word for a kind, and the source's own. The wire vocabulary is
-# lower case so there is one canonical form; AnimeUnity capitalises its own.
-TYPES = {
-    "movie": "Movie", "tv": "TV", "ova": "OVA", "ona": "ONA", "special": "Special",
-}
-
-# The CSRF token stays good for a while and costs a page load to get, so it is
-# not refetched per search.
-_CSRF_TTL = 10 * 60
-
 _scraper = None
-_csrf: tuple[float, str] | None = None
-
-
-def _now() -> float:
-    """Indirected so a test can move the clock without sleeping."""
-    return time.time()
 
 
 def _get_scraper():
@@ -58,57 +34,25 @@ def _get_scraper():
     return _scraper
 
 
-def fetch_home_html() -> str:
-    """The AnimeUnity home page, refreshing the cached CSRF token on the way.
+def home_props() -> dict:
+    """The home page's props: the carousel, the latest episodes and the lists."""
+    return _page_props("/")
 
-    Shared with the start page, which reads its shelves out of this same HTML.
+
+def _page_props(path: str, params: dict | None = None) -> dict:
+    """The Inertia payload of an HTML page: the ``data-page`` attribute's props.
+
+    BeautifulSoup has already decoded the attribute's entities, so it is parsed
+    as it is — unescaping it again would corrupt any `&amp;` inside a plot.
     """
-    global _csrf
-    r = _get_scraper().get(f"https://{host()}/", timeout=15)
-    r.raise_for_status()
-    try:
-        meta = BeautifulSoup(r.text, "lxml").find("meta", {"name": "csrf-token"})
-        if meta and meta.get("content"):
-            _csrf = (_now() + _CSRF_TTL, meta["content"])
-    except Exception as e:
-        logger.debug("Error extracting CSRF token: %s", e)
-    return r.text
-
-
-def forget_csrf() -> None:
-    """Drop the cached token: it belongs to the host that issued it."""
-    global _csrf
-    _csrf = None
-
-
-def _csrf_token() -> str | None:
-    """The cached token, fetching the home page when there is none or it is old."""
-    global _csrf
-    if _csrf and _csrf[0] > _now():
-        return _csrf[1]
-    _csrf = None
-    fetch_home_html()
-    return _csrf[1] if _csrf else None
-
-
-def _ajax_headers(token: str | None) -> dict:
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://{host()}/archivio",
-        "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-    }
-    if token:
-        headers["X-CSRF-TOKEN"] = token
-    return headers
+    r = _get_scraper().get(f"https://{host()}{path}", params=params,
+                           headers={"Accept": "text/html"}, timeout=20)
+    if not r.ok:
+        raise RuntimeError(f"AnimeUnity {path} failed: HTTP {r.status_code}")
+    tag = BeautifulSoup(r.text, "lxml").find(attrs={"data-page": True})
+    if tag is None:
+        raise RuntimeError(f"AnimeUnity {path}: no page payload")
+    return json.loads(tag["data-page"])["props"]
 
 
 def _genres(value) -> list[str]:
@@ -133,50 +77,41 @@ def _genres(value) -> list[str]:
 
 def normalize_title(t: dict) -> dict | None:
     """One raw record into the shape the panel renders, or None if unusable."""
-    title_str = (t.get("title_eng") or t.get("title") or t.get("name") or "").strip()
+    title_str = (t.get("title") or t.get("title_it") or "").strip()
     id_num = t.get("id")
     if not title_str or id_num is None:
         return None
     slug = t.get("slug", "") or ""
+    images = t.get("images") or {}
+    studios = t.get("studios") or []
+    original = (t.get("title_ja") or "").strip()
     return {
         "id": f"{id_num}-{slug}" if slug else str(id_num),
         "name": title_str,
         "type": "anime",
-        # The source's own classification — Movie, TV, OVA, ONA, Special. Kept
+        # The source's own classification — movie, tv, ova, ona, special. Kept
         # beside `type` rather than in it: `type` is "anime" for every record and
         # the whole anime flow keys off that, from the detail modal to the
         # episodes endpoint to the job kind. Without this the card had nothing to
         # go on, so it labelled every film a TV series.
         "media_type": t.get("type") or "",
         "slug": slug,
-        # An absolute URL, unlike StreamingCommunity's bare filename: the
-        # frontend branches on that and sends only the latter through /api/image.
-        "poster": (t.get("imageurl") or t.get("cover") or
-                   t.get("poster") or t.get("image") or ""),
-        "episodes_count": t.get("episodes_count", 0),
-        # The archive endpoint sends these with the search, so the detail panel
-        # costs no request of its own.
+        # Absolute URLs, so the frontend does not route them through /api/image.
+        "poster": images.get("poster") or images.get("cover") or "",
+        "episodes_count": t.get("total_episodes") or 0,
         "plot": t.get("plot") or "",
         "genres": _genres(t.get("genres")),
-        # AnimeUnity keeps an Italian dub as a record of its own: same show,
-        # separate id and slug, "(ITA)" in the title.
-        "dubbed": bool(t.get("dub")),
-        "score": t.get("score") or t.get("vote"),
-        "release_date": t.get("date") or t.get("release_date") or "",
-        # The archive record carries thirty-four fields and the panel was
-        # keeping eleven. These cost nothing - the search already paid for
-        # them - and they are what let an anime's page look like a film's
-        # instead of a bare list of episodes.
-        #
-        # imageurl is the poster; imageurl_cover is the wide banner, which is
-        # what the detail hero wants behind the title. Both are absolute
-        # AniList URLs, so neither goes through /api/image.
-        "backdrop": t.get("imageurl_cover") or "",
-        "studio": t.get("studio") or "",
-        "status": t.get("status") or "",
+        # An Italian dub is a language variant of the same title now, not a
+        # record of its own.
+        "dubbed": any(v.get("language") == "ita" for v in (t.get("variants") or [])),
+        "score": t.get("score"),
+        "release_date": str(t["year"]) if t.get("year") else "",
+        "backdrop": images.get("banner") or "",
+        "studio": studios[0].get("name", "") if studios and isinstance(studios[0], dict) else "",
+        "status": t.get("default_status") or "",
         "season": t.get("season") or "",
-        # The romaji or Japanese title, when it differs from the one shown.
-        "original_name": (t.get("title") or "") if (t.get("title") or "") != title_str else "",
+        # The Japanese title, when it differs from the one shown.
+        "original_name": original if original != title_str else "",
     }
 
 
@@ -192,40 +127,6 @@ def _normalize_titles(titles: list) -> list[dict]:
         if len(results) >= MAX_RESULTS:
             break
     return results
-
-
-def _post_archive(body: dict):
-    """POST the archive query, renewing the CSRF token once if it has gone stale.
-
-    A 419 is Laravel saying the token expired. Fetching a new one and sending the
-    request again is **re-authentication, not a retry** — a different request
-    carrying a new credential — which is why it does not go through
-    ``_shared.with_retry`` and must not be folded into it.
-    """
-    global _csrf
-    scraper = _get_scraper()
-
-    def post(url: str):
-        # shortcut: one redirect hop, re-POSTed by hand, because requests turns a
-        # redirected POST into a GET and the archive answers that with 405. Upgrade
-        # if the source ever chains more than one redirect.
-        r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()),
-                         timeout=20, allow_redirects=False)
-        if r.is_redirect and r.headers.get("Location"):
-            url = urljoin(url, r.headers["Location"])
-            logger.info("AnimeUnity redirected the archive search to %s", url)
-            r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()),
-                             timeout=20, allow_redirects=False)
-        return r
-
-    url = f"https://{host()}/archivio/get-animes"
-    r = post(url)
-    if r.status_code in (403, 419):
-        logger.info("AnimeUnity refused the CSRF token (HTTP %d), renewing it",
-                    r.status_code)
-        _csrf = None
-        r = post(url)
-    return r
 
 
 def search(query: str = "", *, page: int = 1, media_type: str | None = None,
@@ -245,93 +146,90 @@ def search(query: str = "", *, page: int = 1, media_type: str | None = None,
     An empty ``query`` is the archive itself, which is what Esplora browses;
     ``genre`` (the source's id), ``year``, ``order`` and ``status`` are its filters.
     """
-    body = {"title": query, "offset": (max(page, 1) - 1) * ARCHIVE_PAGE}
+    params = {"query": query, "page": max(page, 1)}
     if dubbed:
-        body["dubbed"] = 1
+        params["language"] = "ita"
     if media_type:
-        body["type"] = TYPES.get(media_type.lower(), media_type)
+        params["type"] = media_type.lower()
     if genre:
-        body["genres"] = [{"id": genre}]
-    for key, value in (("year", year), ("order", order), ("status", status)):
+        params["genres[]"] = genre
+    for key, value in (("year", year), ("sort_by", order), ("status", status)):
         if value:
-            body[key] = value
+            params[key] = value
 
-    r = _post_archive(body)
-    if not r.ok:
-        logger.error("Archive search failed with status %d", r.status_code)
-        raise RuntimeError(f"AnimeUnity search failed: HTTP {r.status_code}")
-
-    try:
-        payload = r.json()
-    except Exception as e:
-        logger.error("Error parsing archive response: %s", e)
-        raise
-    records = payload if isinstance(payload, list) else payload.get("records", [])
-
-    # No rows is an answer, not a failure — the same one StreamingCommunity
-    # gives. This used to raise, which reached the panel as a red error box
-    # saying the search had broken when the query simply matched nothing.
-    return _normalize_titles(records)
+    # No rows is an answer, not a failure: a query that matches nothing is an
+    # empty page, and the frontend stops offering "Carica altri" there.
+    animes = _page_props("/archive", params)["animes"]
+    return _normalize_titles(animes.get("data") or [])
 
 
 def browse_options() -> dict:
-    """The genres the archive can be filtered by, read from the archive page itself."""
-    r = _get_scraper().get(f"https://{host()}/archivio", timeout=20)
-    r.raise_for_status()
-    tag = BeautifulSoup(r.text, "html.parser").find("archivio")
-    genres = json.loads(tag["all_genres"]) if tag and tag.get("all_genres") else []
+    """The genres the archive can be filtered by, from the archive page's props."""
+    genres = _page_props("/archive")["animeGenres"]
     return {"genres": [{"id": g["id"], "name": g["name"]} for g in genres]}
 
 
 def get_episodes(anime_id: str) -> list[dict]:
     """
-    Fetch all episodes for an anime using the AnimeUnity info_api.
-    Uses BATCH_SIZE-chunked requests to handle long series.
-    Returns list of {id, number} dicts.
+    Every episode of an anime, from ``/api/anime/{id}/episodes``, which answers
+    120 at a time: ``start`` is the first episode number wanted.
+    Returns the source's episode records (id, number, videos, …).
     """
     scraper = _get_scraper()
-    au_host = host()
+    numeric_id = str(anime_id).split("-", 1)[0]
+    url = f"https://{host()}/api/anime/{numeric_id}/episodes"
 
-    r = scraper.get(f"https://{au_host}/info_api/{anime_id}", timeout=15)
-    r.raise_for_status()
-    episodes_count = r.json().get("episodes_count", 0)
-
-    if not episodes_count:
-        return []
-
-    episodes = []
-    for start in range(0, episodes_count + 1, BATCH_SIZE):
-        end = min(start + BATCH_SIZE - 1, episodes_count)
-        batch_r = scraper.get(
-            f"https://{au_host}/info_api/{anime_id}/0",
-            params={"start_range": start, "end_range": end},
-            timeout=15,
-        )
-        if batch_r.ok:
-            episodes.extend(batch_r.json().get("episodes", []))
-
+    episodes: list[dict] = []
+    total = None
+    while total is None or len(episodes) < total:
+        r = scraper.get(url, params={"start": len(episodes) + 1}, timeout=15)
+        r.raise_for_status()
+        body = r.json()
+        total = body.get("total", 0)
+        batch = body.get("episodes") or []
+        if not batch:
+            break
+        episodes.extend(batch)
     return episodes
 
 
-def _get_embed_content(episode_id) -> tuple[str, str]:
+def _visible_videos(episode: dict) -> list[dict]:
+    return [v for v in (episode.get("videos") or []) if not v.get("is_hidden")]
+
+
+def _pick_video(episode: dict, languages=("ita",)) -> dict:
+    """The video to download: the first of ``languages`` on offer, else the first.
+
+    AnimeUnity has one video per language, each a complete stream with its audio
+    in-band, so a language is a video, not a track of one.
     """
-    Fetch the vixcloud embed page for an episode.
+    videos = _visible_videos(episode)
+    if not videos:
+        raise RuntimeError(f"Episode {episode.get('number')} has no playable video")
+    for lang in languages:
+        for video in videos:
+            if video.get("language") == lang:
+                return video
+    return videos[0]
+
+
+def _get_embed_content(anime_id: str, video_id: int) -> tuple[str, str]:
+    """
+    Fetch the vixcloud embed page for one video of an episode.
     Returns (script_text, embed_url) — same shape as film._get_iframe().
     """
     scraper = _get_scraper()
     au_host = host()
 
-    # AnimeUnity returns the vixcloud embed URL as plain text
-    r = scraper.get(f"https://{au_host}/embed-url/{episode_id}", timeout=15)
-    r.raise_for_status()
-    embed_url = r.text.strip()
+    # The episode page's props carry the embed URL for the video in the path.
+    embed_url = _page_props(f"/anime/{anime_id}/{video_id}").get("embedUrl") or ""
 
     if not embed_url.startswith("http"):
-        raise RuntimeError(f"Unexpected embed-url response: {embed_url[:100]!r}")
+        raise RuntimeError(f"Unexpected embed URL for video {video_id}: {embed_url[:100]!r}")
 
     from app.core._shared import apply_video_host
     embed_url = apply_video_host(embed_url)
-    logger.info("Episode %s embed URL: %s", episode_id, embed_url[:80])
+    logger.info("Video %s embed URL: %s", video_id, embed_url[:80])
 
     # Fetch the vixcloud embed page. vixcloud now serves this /embed/ HTML
     # page behind Cloudflare, so plain requests.get returns a 403 challenge page.
@@ -357,14 +255,11 @@ def _get_embed_content(episode_id) -> tuple[str, str]:
     return script.text, embed_url
 
 
-def get_episode_languages(episode_id) -> dict:
-    """Audio and subtitle languages available on one anime episode."""
-    from app.core._shared import _parse_content, _get_m3u8_url
-    from app.core.m3u8 import fetch_master_languages
-
-    embed_content, embed_url = _get_embed_content(episode_id)
-    json_win_video, json_win_param = _parse_content(embed_content, embed_url)
-    return fetch_master_languages(_get_m3u8_url(json_win_video, json_win_param), embed_url)
+def get_episode_languages(episode: dict) -> dict:
+    """Audio languages of one anime episode: one per video. No subtitles are offered."""
+    audio = list(dict.fromkeys(v["language"] for v in _visible_videos(episode)
+                               if v.get("language")))
+    return {"audio": audio, "subtitles": []}
 
 
 def download_anime_episode(
@@ -396,10 +291,10 @@ def download_anime_episode(
     from app.core.m3u8 import download_m3u8
     from app.core.paths import anime_path
 
-    episode_id = episode["id"]
     episode_number = str(episode.get("number", "0"))
 
-    embed_content, embed_url = _get_embed_content(episode_id)
+    video = _pick_video(episode, audio_languages)
+    embed_content, embed_url = _get_embed_content(anime_id, video["id"])
     json_win_video, json_win_param = _parse_content(embed_content, embed_url)
 
     logger.info(

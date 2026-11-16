@@ -154,7 +154,6 @@ async def set_hosts(body: HostsUpdate):
     if changes:
         _update_data(changes)
     if "animeunity_domain" in changes:
-        animeunity.forget_csrf()
         home.clear_cache("animeunity")
     return _hosts_state()
 

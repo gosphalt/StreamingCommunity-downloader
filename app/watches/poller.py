@@ -87,7 +87,7 @@ def available_tracks(watch: models.Watch) -> dict:
         episodes = animeunity.get_episodes(watch.external_id)
         if not episodes:
             raise RuntimeError("nessun episodio letto dalla fonte")
-        langs = animeunity.get_episode_languages(episodes[-1]["id"])
+        langs = animeunity.get_episode_languages(episodes[-1])
     else:
         from app.core.page import get_domain_version
         from app.core.tv import get_episode_languages, get_info_season, get_info_tv, get_token
