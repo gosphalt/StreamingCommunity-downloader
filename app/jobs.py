@@ -317,6 +317,11 @@ class DownloadSlots:
             self._changed()
 
 
+def _elapsed(job: "DownloadJob") -> Optional[float]:
+    """Seconds of run time so far, or None before the first slot (queue wait excluded)."""
+    return round(time.monotonic() - job.run_started, 1) if job.run_started is not None else None
+
+
 class JobManager:
     def __init__(self):
         self._jobs: dict[str, DownloadJob] = {}
@@ -365,7 +370,8 @@ class JobManager:
             "type": job.type,
             "status": job.status,
             "created_at": job.created_at.isoformat(),
-            "run_seconds": job.run_seconds,
+            # Finished: the final time. Running: the time so far, so a reload shows it too.
+            "run_seconds": job.run_seconds if job.run_seconds is not None else _elapsed(job),
             "scheduled_at": job.scheduled_at.isoformat() if job.scheduled_at else None,
             "schedule_id": job.schedule_id,
             "error": job.error,
@@ -495,7 +501,7 @@ class JobManager:
                     "bytes_total": ev.get("bytes_total"),
                     "bytes_total_estimated": ev.get("bytes_total_estimated", True),
                 }
-            manager._broadcast({**ev, "job_id": job.job_id})
+            manager._broadcast({**ev, "job_id": job.job_id, "run_seconds": _elapsed(job)})
 
         def factory(**kwargs):
             total = kwargs.get("total", 0)
@@ -827,8 +833,7 @@ class JobManager:
                 job.status = "done"
                 job.output_path = result
                 # run_seconds is set by _finish(), which runs after this event, so compute it here too.
-                run_seconds = round(time.monotonic() - job.run_started, 1) if job.run_started is not None else None
-                self._emit(job, {"type": "done", "output_path": result, "run_seconds": run_seconds})
+                self._emit(job, {"type": "done", "output_path": result, "run_seconds": _elapsed(job)})
             except DownloadCancelledError:
                 job.status = "cancelled"
                 self._emit(job, {"type": "error", "message": "Annullato"})

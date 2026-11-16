@@ -237,6 +237,28 @@ function _jobInfoText(progress, status) {
   return [size, speed, eta, pct].filter(Boolean).join(' · ');
 }
 
+// The server sends the run time so far with each frame; the browser counts on
+// from the last one it received, so the figure moves between frames too.
+function _runningText(j) {
+  const phase = _jobPhases[j.job_id];
+  const prefix = (phase === 'joining' || phase === 'merging') ? _phaseLabel(phase) + '...' : null;
+  let run = '';
+  if (j.run_seconds != null) {
+    if (j._runSeen !== j.run_seconds) { j._runSeen = j.run_seconds; j._runAt = Date.now(); }
+    const t = fmtEta(Math.round(j.run_seconds + (Date.now() - j._runAt) / 1000));
+    if (t) run = 'in corso da ' + t;
+  }
+  return [prefix || _jobInfoText(j.progress, 'running'), run].filter(Boolean).join(' · ');
+}
+
+setInterval(() => {
+  for (const j of _jobs.values()) {
+    if (j.status !== 'running') continue;
+    const el = document.getElementById(`job-info-${j.job_id}`);
+    if (el) el.textContent = _runningText(j);
+  }
+}, 1000);
+
 // Built in one place because the card renders them twice: once when it is
 // drawn and again whenever its status changes under it.
 function _fireBtnHtml(jobId) {
@@ -341,7 +363,8 @@ function _buildJobCard(j) {
 
 
   const infoStr = j.retry_at ? _retryText(j)
-    : (j.status === 'queued' ? _waitingText(j) : _jobInfoText(j.progress, j.status));
+    : (j.status === 'queued' ? _waitingText(j)
+      : j.status === 'running' ? _runningText(j) : _jobInfoText(j.progress, j.status));
   const infoTitle = (j.progress?.bytes_total && j.status !== 'done')
     ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
     : '';
@@ -653,6 +676,7 @@ function handleProgressEvent(msg) {
                      bytes_speed:msg.bytes_speed||0, eta:msg.eta||null,
                      bytes_done:msg.bytes_done||0, bytes_total:msg.bytes_total ?? null,
                      bytes_total_estimated:msg.bytes_total_estimated !== false };
+    job.run_seconds = msg.run_seconds ?? job.run_seconds;
     const phase = msg.phase || _jobPhases[msg.job_id] || 'running';
     const prevPhase = _jobPhases[msg.job_id];
     _jobPhases[msg.job_id] = phase;
@@ -664,7 +688,7 @@ function handleProgressEvent(msg) {
   const info = document.getElementById(`job-info-${msg.job_id}`);
   // Same builder as the initial render, so a live frame cannot quietly drop
   // the size the card was showing a moment ago.
-  if (info) info.textContent = _jobInfoText(job ? job.progress : msg, 'running');
+  if (info) info.textContent = job ? _runningText(job) : _jobInfoText(msg, 'running');
 }
 
 function handlePhaseEvent(jobId, phase) {
@@ -688,7 +712,7 @@ function handlePhaseEvent(jobId, phase) {
   const info = document.getElementById(`job-info-${jobId}`);
   if (info) {
     const isIndeterminate = phase === 'joining' || phase === 'merging';
-    if (isIndeterminate) info.textContent = _phaseLabel(phase) + '...';
+    if (isIndeterminate && job) info.textContent = _runningText(job);
   }
   _updateSteps(jobId, phase);
 }

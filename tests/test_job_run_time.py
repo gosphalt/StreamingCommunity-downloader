@@ -25,3 +25,11 @@ def test_a_job_cancelled_before_it_ran_has_no_run_time():
     job = _job("cancelled")
     mgr._finish(job)
     assert job.run_seconds is None
+
+
+def test_a_running_job_reports_the_time_so_far_and_a_queued_one_none():
+    mgr = JobManager()
+    job = _job("running")
+    job.run_started = time.monotonic() - 3
+    assert 2 < mgr._job_to_dict(job)["run_seconds"] < 60
+    assert mgr._job_to_dict(_job("queued"))["run_seconds"] is None
