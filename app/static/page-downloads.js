@@ -73,7 +73,7 @@ function connectGlobalStream() {
         handlePhaseEvent(msg.job_id, msg.phase);
         break;
       case 'done':
-        handleDoneEvent(msg.job_id, msg.output_path);
+        handleDoneEvent(msg.job_id, msg.output_path, msg.run_seconds);
         break;
       case 'error':
         handleErrorEvent(msg.job_id, msg.message);
@@ -620,7 +620,7 @@ function refreshCardAppearance(jobId) {
   if (info) {
     if (j.status==='error') info.textContent = j.error||'Errore';
     else if (j.status==='queued' && !j.retry_at) info.textContent = _waitingText(j);
-    else if (j.status==='done') info.textContent = 'Completato';
+    else if (j.status==='done') info.textContent = 'Completato' + (j.run_seconds >= 0.5 ? ' · in ' + fmtEta(Math.round(j.run_seconds)) : '');
     else if (j.status==='cancelled') info.textContent = 'Annullato';
   }
 
@@ -693,10 +693,10 @@ function handlePhaseEvent(jobId, phase) {
   _updateSteps(jobId, phase);
 }
 
-function handleDoneEvent(jobId, outputPath) {
+function handleDoneEvent(jobId, outputPath, runSeconds) {
   delete _jobPhases[jobId];
   const job = _jobs.get(jobId);
-  if (job) { job.status='done'; job.output_path=outputPath; }
+  if (job) { job.status='done'; job.output_path=outputPath; job.run_seconds=runSeconds; }
   _updateSteps(jobId, 'done');
 
   const card = document.getElementById(`job-card-${jobId}`);

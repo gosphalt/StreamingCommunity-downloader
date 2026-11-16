@@ -826,7 +826,9 @@ class JobManager:
                 result = fn(*args, **kwargs)
                 job.status = "done"
                 job.output_path = result
-                self._emit(job, {"type": "done", "output_path": result})
+                # run_seconds is set by _finish(), which runs after this event, so compute it here too.
+                run_seconds = round(time.monotonic() - job.run_started, 1) if job.run_started is not None else None
+                self._emit(job, {"type": "done", "output_path": result, "run_seconds": run_seconds})
             except DownloadCancelledError:
                 job.status = "cancelled"
                 self._emit(job, {"type": "error", "message": "Annullato"})
