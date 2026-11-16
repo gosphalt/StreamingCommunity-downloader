@@ -62,6 +62,9 @@
               <button class="source-btn" id="src-yt" data-action="search:source" data-source="youtube">
                 <i class="ti ti-brand-youtube"></i>YouTube
               </button>
+              <button class="source-btn" id="src-rp" data-action="search:source" data-source="raiplay">
+                <i class="ti ti-broadcast"></i>RaiPlay
+              </button>
             </div>
             <div class="sc-searchbar">
               <input type="text" id="search-input"
@@ -392,6 +395,7 @@
      app.js — the entry point, which owns the boot listener — is last. -->
 <script src="{{ asset('router.js') }}"></script>
 <script src="{{ asset('page-search.js') }}"></script>
+<script src="{{ asset('page-raiplay.js') }}"></script>
 <script src="{{ asset('page-title.js') }}"></script>
 <script src="{{ asset('page-downloads.js') }}"></script>
 <script src="{{ asset('page-requests.js') }}"></script>

@@ -31,7 +31,7 @@ from app.mcp import server as mcp_http
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
     metadata as metadata_router, download_hooks, library as library_router, mcp as mcp_router,
-    favorites, youtube as youtube_router,
+    favorites, youtube as youtube_router, raiplay as raiplay_router,
 )
 
 logging.basicConfig(
@@ -221,6 +221,7 @@ app.include_router(files.router)
 app.include_router(images.router)
 app.include_router(anime.router)
 app.include_router(youtube_router.router)
+app.include_router(raiplay_router.router)
 
 
 @app.get("/", response_class=HTMLResponse)

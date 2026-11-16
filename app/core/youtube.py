@@ -104,15 +104,13 @@ def search(query: str, limit: int = 20, lang: str = "") -> list[dict]:
     return [_card(e) for e in info.get("entries") or [] if e and e.get("id")]
 
 
-def download_youtube(video_id: str, title: str, output_dir: str, temp_dir: str,
-                     progress_factory=None, cancel_event=None) -> str:
-    """Download one video into output_dir and return the final path."""
-    if not is_video_id(video_id):
-        raise ValueError("Identificativo video non valido")
-    problem = windows_path_problem(output_dir)
-    if problem:
-        raise ValueError(problem)
+def fetch_media(url: str, temp_dir: str, key: str, progress_factory=None,
+                cancel_event=None) -> str:
+    """Download one page's media with yt-dlp into temp_dir and return the file.
 
+    ``key`` names the files yt-dlp writes, so two downloads never share a name.
+    Shared by YouTube and RaiPlay: the caller decides where the file goes.
+    """
     os.makedirs(temp_dir, exist_ok=True)
     bar = progress_factory(total=100, phase="video") if progress_factory else None
     # yt-dlp reports each stream (video, then audio) from zero; the bar must not
@@ -141,7 +139,7 @@ def download_youtube(video_id: str, title: str, output_dir: str, temp_dir: str,
         "format": FORMAT,
         "merge_output_format": container.configured(),
         "noplaylist": True,
-        "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
+        "outtmpl": os.path.join(temp_dir, f"{key}.%(ext)s"),
         "ffmpeg_location": get_ffmpeg_exe(),
         "progress_hooks": [hook],
         "quiet": True,
@@ -150,7 +148,7 @@ def download_youtube(video_id: str, title: str, output_dir: str, temp_dir: str,
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([WATCH_URL + video_id])
+            ydl.download([url])
     except DownloadError:
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelledError()
@@ -161,29 +159,47 @@ def download_youtube(video_id: str, title: str, output_dir: str, temp_dir: str,
     if cancel_event is not None and cancel_event.is_set():
         raise DownloadCancelledError()
 
-    # The merged file is <id>.<container>; a single-stream fallback keeps its own
+    # The merged file is <key>.<container>; a single-stream fallback keeps its own
     # extension. Partial and temp files are never the result.
     names = [n for n in os.listdir(temp_dir)
-             if n.startswith(f"{video_id}.") and not n.endswith((".part", ".ytdl"))]
-    preferred = [n for n in names if n == f"{video_id}.{container.configured()}"]
+             if n.startswith(f"{key}.") and not n.endswith((".part", ".ytdl"))]
+    preferred = [n for n in names if n == f"{key}.{container.configured()}"]
     if not names:
         raise RuntimeError("yt-dlp non ha prodotto nessun file")
     if not preferred and len(names) > 1:
         raise RuntimeError(f"file inattesi dopo il download: {', '.join(names)}")
-    source = os.path.join(temp_dir, (preferred or names)[0])
+    return os.path.join(temp_dir, (preferred or names)[0])
 
-    ext = os.path.splitext(source)[1]
-    os.makedirs(output_dir, exist_ok=True)
-    final = os.path.join(output_dir, f"{sanitize_filename(title)} [{video_id}]{ext}")
+
+def place_file(source: str, final: str) -> str:
+    """Move a finished download to its library path, never half-written in place."""
+    os.makedirs(os.path.dirname(final), exist_ok=True)
     # Staged as a dot-prefixed sibling so a library scan never indexes a half-written
     # file; os.replace is atomic only within one filesystem, hence the sibling.
-    staged = os.path.join(output_dir, "." + os.path.basename(final))
+    staged = os.path.join(os.path.dirname(final), "." + os.path.basename(final))
     shutil.move(source, staged)
     os.replace(staged, final)
     # Jellyfin reads Film.mkv and Film.mp4 in one folder as two versions of a film.
+    ext = os.path.splitext(final)[1]
     stem = os.path.splitext(final)[0]
     for other in (".mkv", ".mp4"):
         if other != ext and os.path.exists(stem + other):
             os.remove(stem + other)
+    return final
+
+
+def download_youtube(video_id: str, title: str, output_dir: str, temp_dir: str,
+                     progress_factory=None, cancel_event=None) -> str:
+    """Download one video into output_dir and return the final path."""
+    if not is_video_id(video_id):
+        raise ValueError("Identificativo video non valido")
+    problem = windows_path_problem(output_dir)
+    if problem:
+        raise ValueError(problem)
+    source = fetch_media(WATCH_URL + video_id, temp_dir, video_id,
+                         progress_factory, cancel_event)
+    ext = os.path.splitext(source)[1]
+    final = place_file(source, os.path.join(output_dir,
+                                            f"{sanitize_filename(title)} [{video_id}]{ext}"))
     logger.info("YouTube download finished: %s", final)
     return final

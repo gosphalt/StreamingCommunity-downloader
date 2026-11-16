@@ -11,6 +11,7 @@ from app import downloads_notify
 from app.auth.deps import OPEN_MODE_USER, current_user, require
 from app.auth.permissions import Permission
 from app.config import configured_domain
+from app.core import raiplay
 from app.jobs import job_manager
 
 logger = logging.getLogger(__name__)
@@ -386,6 +387,31 @@ class YoutubeDownloadRequest(BaseModel):
 def download_youtube(body: YoutubeDownloadRequest, http_request: HttpRequest):
     job_id = job_manager.submit_youtube(
         body.video_id, body.title, user_id=_acting_user_id(http_request))
+    return {"job_id": job_id, "status": "queued"}
+
+
+class RaiplayDownloadRequest(BaseModel):
+    kind: Literal["film", "episode"]
+    # The RaiPlay video path as the search and season listings returned it.
+    video: str = Field(max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    year: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
+    series: Optional[str] = Field(default=None, max_length=300)
+    season: Optional[str] = Field(default=None, pattern=r"^\d{1,4}$")
+    episode: Optional[str] = Field(default=None, pattern=r"^\d{1,4}$")
+
+
+@router.post("/raiplay", status_code=202, dependencies=CAN_DOWNLOAD)
+def download_raiplay(body: RaiplayDownloadRequest, http_request: HttpRequest):
+    if not raiplay.is_video_path(body.video):
+        raise HTTPException(status_code=400, detail="Percorso video RaiPlay non valido")
+    if body.kind == "episode" and not (body.series and body.season and body.episode):
+        raise HTTPException(status_code=400,
+                            detail="Per un episodio servono serie, stagione ed episodio")
+    job_id = job_manager.submit_raiplay(
+        body.video, body.title, body.kind, year=body.year, series=body.series,
+        season=body.season, episode=body.episode,
+        user_id=_acting_user_id(http_request))
     return {"job_id": job_id, "status": "queued"}
 
 

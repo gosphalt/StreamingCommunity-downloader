@@ -997,6 +997,25 @@ class JobManager:
             cancel_event=job.cancel_event,
         )
 
+    def submit_raiplay(self, video_path: str, title: str, kind: str, year: str = None,
+                       series: str = None, season: str = None, episode: str = None,
+                       user_id: int = None) -> str:
+        from app.core.raiplay import download_raiplay
+
+        # Like YouTube: not schedulable and not a batch, so _build_call has no branch.
+        job = self._make_job(title, "raiplay", phases=["video", "done"],
+                             user_id=user_id, media_label=series or title, year=year,
+                             external_id=video_path)
+        return self._submit_job(
+            job, download_raiplay,
+            video_path, title, kind,
+            output_dir=_get_library_path("film" if kind == "film" else "tv"),
+            temp_dir=_tmp_dir(job),
+            year=year, series=series, season=season, episode=episode,
+            progress_factory=self._make_progress_factory(job),
+            cancel_event=job.cancel_event,
+        )
+
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
                        schedule_id: str = None,
