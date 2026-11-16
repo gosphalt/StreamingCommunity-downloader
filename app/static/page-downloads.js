@@ -373,7 +373,7 @@ function _buildJobCard(j) {
         <div class="progress-bar ${barClass}${animated} job-progress-bar" id="job-bar-${j.job_id}" style="width:${barWidth}%"></div>
       </div>
       <div class="d-flex justify-content-between align-items-center">
-        <small class="text-muted" id="job-info-${j.job_id}"${infoTitle}>${infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato'+(j.run_seconds?' in '+fmtEta(j.run_seconds):''):''))}</small>
+        <small class="text-muted" id="job-info-${j.job_id}"${infoTitle}>${j.status==='done' && j.run_seconds >= 0.5 ? [infoStr || 'Completato', 'in '+fmtEta(Math.round(j.run_seconds))].join(' · ') : (infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato':'')))}</small>
         <small class="text-muted">${dateLabel}</small>
       </div>
     </div>
