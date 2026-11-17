@@ -131,7 +131,11 @@ async function loadTitlePage(route) {
     if (token !== _tpToken) return;
     await tpLoadSeason(1, token);
   }
-  else if (route.type === 'anime') await _tpLoadAnime(token);
+  else if (route.type === 'anime') {
+    await metaReady;
+    if (token !== _tpToken) return;
+    await _tpLoadAnime(token);
+  }
 }
 
 function _tpApplyMeta(meta) {
@@ -179,7 +183,8 @@ async function _tpLoadAnime(token) {
   _tp.episodes = null;
   _tpRenderEpisodes();
   try {
-    const eps = await api.get(`/api/anime/${_tp.id}/episodes`);
+    // The title and year name the folder the in-library marks are read from.
+    const eps = await api.get(`/api/anime/${_tp.id}/episodes`, {title: _tp.name, year: _tp.year || ''});
     if (token !== _tpToken) return;
     // Spread, not a projection: startAnimeDownload reads episode.number and
     // posts the whole record back. Narrowing it to {id, n} here sent the API
@@ -499,9 +504,8 @@ function _tpRenderEpisodes() {
   let batch = '';
   if (_tp.episodes?.length) {
     if (can('DOWNLOAD')) {
-      // Only a StreamingCommunity season knows what it holds before asking:
-      // its episodes arrive flagged in_library. For anime the server decides.
-      const owned = _tp.type === 'tv' ? _tp.episodes.filter(e => e.in_library).length : 0;
+      // Both sources arrive with their episodes flagged in_library by the server.
+      const owned = _tp.episodes.filter(e => e.in_library).length;
       const ownedHint = owned ? ` <span class="th-only-missing-n">(${owned} già presenti)</span>` : '';
       batch = `<label class="form-check form-switch th-only-missing"
                       title="Salta gli episodi il cui file è già in libreria">

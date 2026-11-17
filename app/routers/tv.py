@@ -49,7 +49,7 @@ async def fetch_seasons(tv_id: int, slug: str = Query(...), version: str = Query
 
 
 def _mark_in_library(episodes: list[dict], title: str, season: int, year: str,
-                     tv_id=None) -> None:
+                     tv_id=None, kind: str = "episode") -> None:
     """Flag the episodes already sitting in the library.
 
     The title arrives from the caller because the episode list has no other
@@ -66,18 +66,20 @@ def _mark_in_library(episodes: list[dict], title: str, season: int, year: str,
     from app import library
     from app.core import container
     from app.requests.resolver import (
-        EPISODE, episode_candidates, first_existing, library_dir, series_years,
+        episode_candidates, first_existing, library_dir, series_years,
     )
 
-    output_dir = library_dir(EPISODE)
-    source = library.SOURCE_BY_KIND[EPISODE]
+    # kind is "episode" for a TV series and "anime" for AnimeUnity: the same
+    # layout, a different folder and a different registry source.
+    output_dir = library_dir(kind)
+    source = library.SOURCE_BY_KIND[kind]
     # Read once per season rather than per episode: the registry, the series'
     # folders under other years (#24), and each associated folder's listing,
     # which Held reads once and keeps.
     cont = container.configured()
     try:
-        held = library.held(source, EPISODE, tv_id, output_dir) if tv_id is not None else []
-        rejected = library.rejected_folders(source, EPISODE, tv_id) if tv_id is not None else set()
+        held = library.held(source, kind, tv_id, output_dir) if tv_id is not None else []
+        rejected = library.rejected_folders(source, kind, tv_id) if tv_id is not None else set()
     except Exception:
         logger.exception("Cannot read the associated folders of series %s", tv_id)
         held, rejected = [], set()
@@ -92,7 +94,7 @@ def _mark_in_library(episodes: list[dict], title: str, season: int, year: str,
                                        container=cont)
             episode["in_library"] = (
                 first_existing(*bases) is not None
-                or library.locate(held, EPISODE, season=season, episode=episode["n"]) is not None
+                or library.locate(held, kind, season=season, episode=episode["n"]) is not None
             )
         except Exception:
             # A library check is a convenience. It must never be the reason an
