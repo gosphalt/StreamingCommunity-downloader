@@ -8,7 +8,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from app.config import VIDEOS_DIR, TMP_DIR, get_settings
 from app.progress import DownloadCancelledError, WebProgressBar
@@ -112,6 +112,11 @@ class DownloadJob:
     # Its ticket while it waits for a download slot (None otherwise): the
     # waiting jobs start in ticket order, so the frontend can number the line.
     queue_seq: Optional[int] = None
+    # Set by DownloadSlots when a slot is granted: the job starts its thread (on_grant)
+    # only then, so a job waiting in the line holds no thread.
+    granted: bool = False
+    slot_counted: bool = False
+    on_grant: Optional[Callable[[], None]] = field(default=None, repr=False, compare=False)
     # The folder under TMP_DIR holding this job's segments, when it is not the
     # job's own id: a manual retry reuses the failed job's folder, so the
     # segments already fetched are not fetched again.
@@ -204,31 +209,58 @@ class DownloadSlots:
         return (j.priority, -j.queue_seq)
 
     def _next(self) -> Optional["DownloadJob"]:
-        """The job that gets the next free slot. Caller holds the lock."""
+        """The job that gets the next free slot. Caller holds the lock.
+
+        Any waiting job can be granted, with or without a thread: a job without
+        one is started when it is granted, so priority and moves apply to the
+        whole line, not only to the jobs that happened to get a thread first."""
         if self._head_stale:
-            # Only a job with a thread waiting can take a slot. One still in the
-            # executor's queue has a ticket but no thread, and as head it would
-            # hold the line for everyone. Tickets follow submission, and threads
-            # start in submission order, so the threaded head is still the lowest ticket.
-            ready = [j for j in self._line
-                     if id(j) in self._waiters and (not j.pause_event.is_set() or j.cancel_event.is_set())]
+            ready = [j for j in self._line if not j.pause_event.is_set() or j.cancel_event.is_set()]
             self._head = max(ready, key=self._order_key, default=None)
             self._head_stale = False
         return self._head
 
     def _changed(self) -> None:
-        """The line, a flag or the limit changed: work out who is next again
-        and wake only who has something to do — the head, if a slot is free,
-        and anyone cancelled, who leaves at once. Caller holds the lock. Pause,
-        cancel and priority are set outside it, which is why their setters call
-        wake()."""
+        """The line, a flag or the limit changed: grant what can be granted now.
+        Caller holds the lock. A cancelled job leaves the line at once and takes
+        no slot; the free slots go to the head in order. Pause, cancel and
+        priority are set outside the lock, which is why their setters call wake()."""
         self._head_stale = True
-        head = self._next() if self._busy < self._limit else None
-        for j in self._line:
-            if j is head or j.cancel_event.is_set():
-                waiter = self._waiters.get(id(j))
-                if waiter is not None:
-                    waiter.notify()
+        for j in [j for j in self._line if j.cancel_event.is_set()]:
+            self._grant(j, counted=False)
+        while self._busy < self._limit:
+            head = self._next()
+            if head is None:
+                break
+            self._grant(head, counted=True)
+
+    def _grant(self, job: "DownloadJob", counted: bool) -> None:
+        """Hand a waiting job its slot. Caller holds the lock. A job with a thread
+        waiting is woken; one without starts its thread now, not before."""
+        self._line.remove(job)
+        job.queue_seq = None
+        job.granted = True
+        job.slot_counted = counted
+        if counted:
+            self._busy += 1
+        self._head_stale = True
+        waiter = self._waiters.get(id(job))
+        if waiter is not None:
+            waiter.notify()
+        elif job.on_grant is not None:
+            job.on_grant()
+
+    def _take(self, job: "DownloadJob") -> bool:
+        """Consume a grant. Caller holds the lock. A job cancelled after its grant
+        gives the slot back and does not run."""
+        job.granted = False
+        if job.cancel_event.is_set():
+            if job.slot_counted:
+                self._busy -= 1
+            job.slot_counted = False
+            self._changed()
+            return False
+        return True
 
     def move(self, job: "DownloadJob", where: str) -> list:
         """Move a waiting job to the top, one place up or down, or the bottom.
@@ -307,42 +339,40 @@ class DownloadSlots:
             self._changed()
             return changed
 
-    def enqueue(self, job: "DownloadJob", on_queued=None) -> None:
+    def enqueue(self, job: "DownloadJob", on_queued=None, on_grant=None) -> None:
         """Give a job its place in the line. Done at submit, not when its thread
-        starts: with more jobs than threads the rest had no ticket and no position."""
+        starts. ``on_grant`` starts the job's thread once it is granted a slot, so
+        a job waiting for one holds no thread at all."""
         with self._cond:
             self._tickets += 1
             job.queue_seq = self._tickets
+            job.on_grant = on_grant
             self._line.append(job)
             self._head_stale = True
         if on_queued is not None:
             on_queued(job)
+        with self._cond:
+            self._changed()
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
-        """Wait for a slot. False when the job was cancelled while waiting. A job
-        already in the line keeps its ticket; one back from a pause or a retry joins again."""
+        """Take the slot granted to this job, waiting for one if needed. False when
+        the job was cancelled. A job already in the line keeps its ticket; one back
+        from a pause or a retry joins again."""
         with self._cond:
-            queued = job in self._line
-        if not queued:
+            pending = job.granted or job in self._line
+        if not pending:
             self.enqueue(job, on_queued)
         with self._cond:
+            if job.granted:
+                return self._take(job)
             waiter = self._waiters[id(job)] = threading.Condition(self._cond)
             self._head_stale = True
             try:
-                while not (self._busy < self._limit and self._next() is job):
-                    if job.cancel_event.is_set():
-                        return False
+                while not job.granted:
                     waiter.wait()
-                if job.cancel_event.is_set():
-                    return False
-                self._busy += 1
-                return True
+                return self._take(job)
             finally:
-                self._line.remove(job)
                 del self._waiters[id(job)]
-                job.queue_seq = None
-                # The next in line may now be at the head with a slot free.
-                self._changed()
 
     def release(self) -> None:
         with self._cond:
@@ -599,8 +629,8 @@ class JobManager:
         self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
         self._remember_call(job, fn, args, kwargs)
         self._persist(job)
-        self._slots.enqueue(job, on_queued=self._announce_queued)
-        self._executor.submit(self._run_download, job, fn, *args, **kwargs)
+        self._slots.enqueue(job, on_queued=self._announce_queued,
+                            on_grant=lambda: self._executor.submit(self._run_download, job, fn, *args, **kwargs))
 
     def _build_call(self, type_: str, params: dict, job: DownloadJob):
         pf = self._make_progress_factory(job)
@@ -991,8 +1021,8 @@ class JobManager:
         self._remember_call(job, fn, args, kwargs)
         self._persist(job)
         self._broadcast({"type": "job_created", "job": self._job_to_dict(job)})
-        self._slots.enqueue(job, on_queued=self._announce_queued)
-        self._executor.submit(self._run_download, job, fn, *args, **kwargs)
+        self._slots.enqueue(job, on_queued=self._announce_queued,
+                            on_grant=lambda: self._executor.submit(self._run_download, job, fn, *args, **kwargs))
         return job.job_id
 
     def _make_job(self, title: str, type_: str, scheduled_at: Optional[datetime] = None,

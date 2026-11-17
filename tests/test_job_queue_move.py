@@ -16,11 +16,14 @@ def _job(name, seq, priority=0):
     return SimpleNamespace(
         name=name, queue_seq=seq, priority=priority,
         pause_event=threading.Event(), cancel_event=threading.Event(),
+        granted=False, slot_counted=False, on_grant=None,
     )
 
 
 def _line(*jobs):
     slots = DownloadSlots(1)
+    # The only slot is taken, so nothing is granted and the order under test stays put.
+    slots._busy = slots._limit
     slots._line.extend(jobs)
     # Only a job with a thread waiting can be granted a slot; these tests stand in for those threads.
     for j in jobs:
