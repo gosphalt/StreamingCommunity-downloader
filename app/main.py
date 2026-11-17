@@ -190,6 +190,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="StreamingCommunity Web Panel", version=__version__, lifespan=lifespan)
 
+
+@app.exception_handler(writable.LibraryUnavailable)
+async def _library_unavailable(_request, exc):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
 # Authentication is enforced here, once, for every request. Endpoints are closed
 # by default; app/auth/deps.py holds the explicit public allowlist.
 app.add_middleware(AuthMiddleware)

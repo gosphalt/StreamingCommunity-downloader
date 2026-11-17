@@ -27,6 +27,37 @@ class NotWritableError(RuntimeError):
     pass
 
 
+class LibraryUnavailable(RuntimeError):
+    """A library sits on a drive the system declares but has not mounted."""
+
+
+FSTAB = Path("/etc/fstab")
+
+
+def unmounted_library(path) -> str | None:
+    """The fstab mount point ``path`` sits under, when that mount is not active.
+
+    A drive that fails to mount leaves an empty folder on the system disk, and a
+    download into it succeeds and is never seen again. Only mount points the
+    system declares in fstab are judged, so a folder that was never a mount is
+    not refused. Off Linux there is no fstab and nothing is refused.
+    """
+    try:
+        lines = FSTAB.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    target = os.path.abspath(str(path))
+    for line in lines:
+        parts = line.split()
+        if not parts or parts[0].startswith("#") or len(parts) < 3 or parts[2] == "swap":
+            continue
+        mount = os.path.abspath(parts[1])
+        inside = target == mount or target.startswith(mount.rstrip(os.sep) + os.sep)
+        if inside and not os.path.ismount(mount):
+            return mount
+    return None
+
+
 def _identity() -> str:
     """``uid 1000:1000`` on POSIX; empty on Windows, which has neither call."""
     if hasattr(os, "getuid"):

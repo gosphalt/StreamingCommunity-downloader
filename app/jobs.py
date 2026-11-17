@@ -12,7 +12,7 @@ from typing import Optional
 
 from app.config import VIDEOS_DIR, TMP_DIR, get_settings
 from app.progress import DownloadCancelledError, WebProgressBar
-from app import job_store
+from app import job_store, writable
 
 
 def _get_library_path(type_: str) -> str:
@@ -979,6 +979,13 @@ class JobManager:
         return resumed
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
+        # Refused before the job exists: it would otherwise queue, download, and
+        # only then write into the empty folder left by the missing drive.
+        if kwargs.get("output_dir"):
+            missing = writable.unmounted_library(kwargs["output_dir"])
+            if missing:
+                raise writable.LibraryUnavailable(
+                    f"La libreria è su {missing}, che non è montato: il download non parte.")
         with self._lock:
             self._jobs[job.job_id] = job
         self._remember_call(job, fn, args, kwargs)
