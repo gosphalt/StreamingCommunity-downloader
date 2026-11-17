@@ -94,3 +94,32 @@ def test_moving_every_way_keeps_all_jobs_in_the_line(where):
     for j in jobs:
         slots.move(j, where)
     assert sorted(_names(slots)) == ["0", "1", "2"]
+
+
+def test_a_block_moves_past_the_neighbour_keeping_its_order():
+    a, b, c, d, e = (_job(n, i) for i, n in enumerate("abcde", 1))
+    slots = _line(a, b, c, d, e)
+    # the block b,c,d moves up: a jumps below it
+    slots.move_group([b, c, d], "up")
+    assert _names(slots) == ["b", "c", "d", "a", "e"]
+    # down passes the single neighbour below: a goes back above the block
+    slots.move_group([b, c, d], "down")
+    assert _names(slots) == ["a", "b", "c", "d", "e"]
+    slots.move_group([b, c, d], "down")
+    assert _names(slots) == ["a", "e", "b", "c", "d"]
+
+
+def test_a_block_already_at_the_edge_does_not_move():
+    a, b, c = _job("a", 1), _job("b", 2), _job("c", 3)
+    slots = _line(a, b, c)
+    assert slots.move_group([a, b], "up") == []
+    assert slots.move_group([b, c], "down") == []
+    assert _names(slots) == ["a", "b", "c"]
+
+
+def test_a_block_takes_the_priority_of_the_neighbour_it_lands_beside():
+    a, b, c = _job("a", 1, priority=10), _job("b", 2), _job("c", 3)
+    slots = _line(a, b, c)
+    slots.move_group([b, c], "up")
+    assert [j.priority for j in (b, c)] == [10, 10]
+    assert _names(slots) == ["b", "c", "a"]

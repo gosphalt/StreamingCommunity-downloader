@@ -516,14 +516,23 @@ function _buildJobGroup(batchId, label, jobs) {
     counts.error ? `<span class="jg-n jg-err">${counts.error} falliti</span>` : '',
   ].filter(Boolean).join('');
   const body = collapsed ? '' : jobs.map(_buildJobCard).join('');
+  const b = escapeHtml(batchId);
+  const btn = (action, icon, title) =>
+    `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:group${action}" data-batch="${b}" title="${title}"><i class="ti ti-${icon}"></i></button>`;
+  const move = to => `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:groupMove" data-batch="${b}" data-to="${to}" title="${to === 'up' ? 'Sposta il gruppo su' : 'Sposta il gruppo giù'}"><i class="ti ti-arrow-${to}"></i></button>`;
+  const toolbar = `<div class="d-flex flex-wrap gap-1 align-items-center px-2 pb-2">
+    ${btn('Pause', 'player-pause', 'Metti in pausa il gruppo')}${btn('Resume', 'player-play', 'Riprendi il gruppo')}
+    <select class="form-select form-select-sm w-auto" data-change="jobs:groupPriority" data-batch="${b}" title="Priorità del gruppo">${_priorityOptions(0)}</select>
+    ${move('up')}${move('down')}${btn('Cancel', 'player-stop', 'Interrompi il gruppo')}</div>`;
   return `<div class="job-group${collapsed ? ' is-collapsed' : ''}">
-    <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${escapeHtml(batchId)}"
+    <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${b}"
             aria-expanded="${collapsed ? 'false' : 'true'}">
       <i class="ti ti-chevron-down jg-chev"></i>
       <span class="jg-title">${escapeHtml(label)}</span>
       <span class="jg-count">${count}</span>
       <span class="jg-summary">${summary}</span>
     </button>
+    ${toolbar}
     <div class="job-group-body">${body}</div>
   </div>`;
 }
@@ -783,6 +792,21 @@ async function moveJob(jobId, to) {
 const _dlSelected = new Set();   // job ids ticked for a bulk action
 
 // The ticked jobs, or every unfinished one when nothing is ticked.
+// Group controls act on the unfinished jobs of one batch, through the same bulk endpoint.
+function _groupIds(batchId) {
+  return [..._jobs.values()].filter(j => j.batch_id === batchId && _isUnfinished(j)).map(j => j.job_id);
+}
+
+async function groupAction(batchId, action, extra = {}) {
+  const ids = _groupIds(batchId);
+  if (!ids.length) return;
+  if (action !== 'move') return bulkAction(action, extra, ids);
+  try {
+    await api.post('/api/download/bulk', {action: 'move', job_ids: ids, to: extra.to});
+  } catch(e) { showToast(errText(e), 'danger'); }
+  renderAllJobCards();
+}
+
 function _bulkTargets() {
   const ids = [..._dlSelected].filter(id => _jobs.has(id));
   return ids.length ? ids : [..._jobs.values()].filter(_isUnfinished).map(j => j.job_id);
@@ -895,6 +919,11 @@ registerActions({
   'jobs:filter':      d => setDlFilter(d.filter),
   'jobs:fire':        d => fireNow(d.job),
   'jobs:move':        d => moveJob(d.job, d.to),
+  'jobs:groupPause':    d => groupAction(d.batch, 'pause'),
+  'jobs:groupResume':   d => groupAction(d.batch, 'resume'),
+  'jobs:groupCancel':   d => groupAction(d.batch, 'cancel'),
+  'jobs:groupMove':     d => groupAction(d.batch, 'move', {to: d.to}),
+  'jobs:groupPriority': (d, el) => groupAction(d.batch, 'priority', {priority: Number(el.value)}),
   'jobs:cancel':      d => cancelJob(d.job),
   'jobs:pause':       d => bulkAction('pause', {}, [d.job]),
   'jobs:resume':      d => bulkAction('resume', {}, [d.job]),

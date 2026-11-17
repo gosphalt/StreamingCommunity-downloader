@@ -263,6 +263,50 @@ class DownloadSlots:
             self._changed()
             return changed
 
+    def move_group(self, group: list, where: str) -> list:
+        """Move a block of waiting jobs one place up or down, keeping its order.
+
+        The neighbour directly above (or below) the block jumps to the other side
+        of it; the block takes that neighbour's priority, as a single move does.
+        Returns the jobs whose ticket or priority changed.
+        """
+        with self._cond:
+            line = sorted(self._line, key=self._order_key, reverse=True)
+            ids = {id(j) for j in group}
+            idx = [i for i, j in enumerate(line) if id(j) in ids]
+            if not idx:
+                return []
+            if where == "up":
+                if idx[0] == 0:
+                    return []
+                nb = line[idx[0] - 1]
+                rest = [j for j in line if j is not nb]
+                last = max(i for i, j in enumerate(rest) if id(j) in ids)
+                pos = last + 1
+            else:
+                if idx[-1] == len(line) - 1:
+                    return []
+                nb = line[idx[-1] + 1]
+                rest = [j for j in line if j is not nb]
+                first = min(i for i, j in enumerate(rest) if id(j) in ids)
+                pos = first
+            new_order = rest[:pos] + [nb] + rest[pos:]
+            # the block lands beside nb, so it takes nb's priority
+            changed = []
+            for j in line:
+                if id(j) in ids and j.priority != nb.priority:
+                    j.priority = nb.priority
+                    changed.append(j)
+            listed = {id(j) for j in changed}
+            for seq, j in zip(sorted(x.queue_seq for x in line), new_order):
+                if j.queue_seq != seq:
+                    j.queue_seq = seq
+                    if id(j) not in listed:
+                        listed.add(id(j))
+                        changed.append(j)
+            self._changed()
+            return changed
+
     def enqueue(self, job: "DownloadJob", on_queued=None) -> None:
         """Give a job its place in the line. Done at submit, not when its thread
         starts: with more jobs than threads the rest had no ticket and no position."""
@@ -687,6 +731,20 @@ class JobManager:
             self._broadcast({"type": "job_queued", "job_id": j.job_id, "queue_seq": j.queue_seq})
         self._broadcast({"type": "job_flags", "job_id": job_id,
                          "paused": job.pause_event.is_set(), "priority": job.priority})
+        return True
+
+    def move_group_in_queue(self, job_ids: list, where: str) -> bool:
+        """Move the waiting jobs among job_ids as one block; see DownloadSlots.move_group."""
+        with self._lock:
+            group = [j for j in (self._jobs.get(i) for i in job_ids) if j and j.status == "queued"]
+        changed = self._slots.move_group(group, where)
+        if not changed:
+            return False
+        self._slots.wake()
+        for j in changed:
+            self._broadcast({"type": "job_queued", "job_id": j.job_id, "queue_seq": j.queue_seq})
+            self._broadcast({"type": "job_flags", "job_id": j.job_id,
+                             "paused": j.pause_event.is_set(), "priority": j.priority})
         return True
 
     def dismiss(self, job_id: str) -> bool:

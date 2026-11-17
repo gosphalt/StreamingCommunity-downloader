@@ -518,10 +518,11 @@ def retry(job_id: str):
 
 
 class BulkAction(BaseModel):
-    action: Literal["pause", "resume", "cancel", "priority"]
+    action: Literal["pause", "resume", "cancel", "priority", "move"]
     # Omitted means every job the action applies to.
     job_ids: Optional[list[str]] = Field(default=None, max_length=2000)
     priority: Optional[int] = Field(default=None, ge=-100, le=100)
+    to: Optional[Literal["up", "down"]] = None
 
 
 @router.post("/bulk", status_code=200, dependencies=CAN_CONTROL_JOBS)
@@ -529,7 +530,12 @@ def bulk(body: BulkAction):
     """Pause, resume, stop or reprioritise many jobs; only the ones it applies to are touched."""
     if body.action == "priority" and body.priority is None:
         raise HTTPException(status_code=422, detail="priority mancante")
+    if body.action == "move" and body.to is None:
+        raise HTTPException(status_code=422, detail="to mancante")
     ids = body.job_ids if body.job_ids is not None else [j["job_id"] for j in job_manager.list_jobs()]
+    if body.action == "move":
+        # A block moves as one unit, so it is not a per-job loop.
+        return {"moved": job_manager.move_group_in_queue(ids, body.to)}
     do = {
         "pause": lambda i: job_manager.set_paused(i, True),
         "resume": lambda i: job_manager.set_paused(i, False),
