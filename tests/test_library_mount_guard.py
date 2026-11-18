@@ -58,3 +58,18 @@ def test_a_submission_into_an_inactive_library_creates_no_job(fstab, monkeypatch
     with pytest.raises(writable.LibraryUnavailable, match="wdblack1"):
         job_manager._submit_job(job, lambda *a, **k: None, output_dir="/mnt/wdblack1/Film/")
     assert job.job_id not in job_manager._jobs
+
+
+def test_a_job_on_an_unmounted_drive_stays_saved_and_does_not_stop_the_start(fstab, monkeypatch):
+    """Startup resumes saved jobs; one whose drive is missing must not crash the panel."""
+    from app import jobs as jobs_module
+    from app.jobs import job_manager
+    monkeypatch.setattr(os.path, "ismount", _mounted())
+    record = {"fn": "x", "args": [], "kwargs": {"output_dir": "/mnt/wdblack1/Film/"},
+              "job": {"title": "Film", "type": "film", "phases": ["video", "done"]}}
+    monkeypatch.setattr(jobs_module.job_store, "load_all", lambda: [("job-z", record)])
+    monkeypatch.setattr(jobs_module, "_resolve_fn", lambda name: (lambda *a, **k: None))
+    deleted = []
+    monkeypatch.setattr(jobs_module.job_store, "delete", lambda job_id: deleted.append(job_id))
+    assert job_manager.resume_interrupted() == 0
+    assert deleted == []

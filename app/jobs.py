@@ -1004,7 +1004,12 @@ class JobManager:
                       "progress_factory": self._make_progress_factory(job),
                       "cancel_event": job.cancel_event}
             logger.info("Resuming download job %s after a restart", job_id)
-            self._submit_job(job, fn, *args, **kwargs)
+            try:
+                self._submit_job(job, fn, *args, **kwargs)
+            except writable.LibraryUnavailable as e:
+                # Its record stays: the job resumes at a later start, once the drive is back.
+                logger.warning("Job %s waits for its library: %s", job_id, e)
+                continue
             resumed += 1
         return resumed
 
