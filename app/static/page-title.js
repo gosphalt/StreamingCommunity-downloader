@@ -830,17 +830,25 @@ async function downloadWholeSeries() {
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
 
 
+// Read at submit, not at page load: a change in Settings must reach a download
+// started from a title page that was already open. Falls back to what is held.
+async function _animeAudio(held) {
+  try { return [(await api.get('/api/anime/default-audio')).audio]; }
+  catch (e) { return held || ['ita']; }
+}
+
 async function startAnimeDownload(epIndex) {
   const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
   const episode = episodes[epIndex];
   const label = `${animeName} E${episode.number}`;
+  const audio = await _animeAudio(audioLangs);
 
   if (!can('DOWNLOAD')) {
     await submitRequest({
       source: 'animeunity', media_type: 'anime', external_id: String(animeId),
       title: animeName, year: animeYear, anime_type: animeType,
       episode_number: String(episode.number),
-      audio_languages: audioLangs || ['ita'],
+      audio_languages: audio,
       subtitle_languages: subLangs || [],
     }, label);
     return;
@@ -849,7 +857,7 @@ async function startAnimeDownload(epIndex) {
   const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
   const body = {
     anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear,
-    audio_languages: audioLangs || ['ita'],
+    audio_languages: audio,
     subtitle_languages: subLangs || ['ita', 'eng'],
   };
   if (scheduledAt) body.scheduled_at = scheduledAt;
@@ -868,7 +876,7 @@ async function downloadAllAnime() {
   await _startBatch('/api/download/anime-all', {
     anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
     year: animeYear,
-    audio_languages: audioLangs, subtitle_languages: subLangs,
+    audio_languages: await _animeAudio(audioLangs), subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
     only_missing: _onlyMissing(),
   });
