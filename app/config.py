@@ -100,6 +100,10 @@ SETTINGS_DEFAULTS = {
     # these — app.config must not import app.core.
     "output_container": "mkv",
     "subtitle_mode": "embed",
+    # The audio an AnimeUnity title is downloaded in when nothing else is asked.
+    # AnimeUnity offers one complete video per language: "jpn" is the original
+    # version, which usually carries subtitles.
+    "anime_default_audio": "ita",
     # The MCP endpoint at /mcp. Off by default: it lets an agent act as a user.
     "mcp_enabled": False,
 }
@@ -153,6 +157,15 @@ def get_settings() -> dict:
         return {**SETTINGS_DEFAULTS, **data.get("settings", {})}
     except (FileNotFoundError, json.JSONDecodeError):
         return dict(SETTINGS_DEFAULTS)
+
+
+ANIME_AUDIO_CHOICES = ("ita", "jpn")
+
+
+def anime_default_audio() -> str:
+    """The audio language an AnimeUnity download defaults to. Unknown values fall back to Italian."""
+    value = get_settings().get("anime_default_audio")
+    return value if value in ANIME_AUDIO_CHOICES else "ita"
 
 
 def atomic_write_text(path: Path, text: str) -> None:

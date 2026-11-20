@@ -16,6 +16,13 @@ router = APIRouter(
 )
 
 
+@router.get("/default-audio")
+def default_audio():
+    """The audio an anime title starts on. Read-only; saved from Settings."""
+    from app.config import anime_default_audio
+    return {"audio": anime_default_audio()}
+
+
 @router.get("/{anime_id}/episodes")
 async def get_episodes(anime_id: str, title: str = Query("", max_length=200),
                        year: str = Query("", max_length=10)):

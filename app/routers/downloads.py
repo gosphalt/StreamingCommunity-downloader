@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app import downloads_notify
 from app.auth.deps import OPEN_MODE_USER, current_user, require
 from app.auth.permissions import Permission
-from app.config import configured_domain
+from app.config import anime_default_audio, configured_domain
 from app.core import raiplay
 from app.jobs import job_manager
 
@@ -89,7 +89,7 @@ class AnimeDownloadRequest(BaseModel):
     anime_name: str
     anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
-    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    audio_languages: list[str] = Field(default_factory=lambda: [anime_default_audio()], max_length=10)
     subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
 
 
@@ -129,7 +129,7 @@ class AnimeAllDownloadRequest(BaseModel):
     anime_name: str
     anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
-    audio_languages: list[str] = Field(default=["ita"], max_length=10)
+    audio_languages: list[str] = Field(default_factory=lambda: [anime_default_audio()], max_length=10)
     subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
     scheduled_at: datetime | None = None
     # Skip episodes whose file is already in the library (#30).

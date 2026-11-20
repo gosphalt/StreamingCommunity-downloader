@@ -184,8 +184,12 @@ async function _tpLoadAnime(token) {
   _tpRenderEpisodes();
   try {
     // The title and year name the folder the in-library marks are read from.
-    const eps = await api.get(`/api/anime/${_tp.id}/episodes`, {title: _tp.name, year: _tp.year || ''});
+    const [eps, pref] = await Promise.all([
+      api.get(`/api/anime/${_tp.id}/episodes`, {title: _tp.name, year: _tp.year || ''}),
+      api.get('/api/anime/default-audio').catch(() => ({audio: 'ita'})),
+    ]);
     if (token !== _tpToken) return;
+    _tp.defaultAudio = pref.audio;
     // Spread, not a projection: startAnimeDownload reads episode.number and
     // posts the whole record back. Narrowing it to {id, n} here sent the API
     // a stripped object and labelled every job "E undefined". `n` is added
@@ -220,7 +224,10 @@ function _tpSyncEpCtx(token) {
 
 function _tpPicked(which) {
   const picked = (_tp[which] || []).filter(t => t.on).map(t => t.code);
-  return which === 'audio' ? (picked.length ? picked : ['ita']) : picked;
+  if (which !== 'audio') return picked;
+  // An anime has no track list: its audio is the Settings choice.
+  const fallback = _tp.type === 'anime' ? (_tp.defaultAudio || 'ita') : 'ita';
+  return picked.length ? picked : [fallback];
 }
 
 // ── Tracks ────────────────────────────────────────────────────────────────────

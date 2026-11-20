@@ -417,12 +417,14 @@ async function loadOutputSettings() {
   if (!data) return;
   document.getElementById('setting-output-container').value = data.output_container || 'mkv';
   document.getElementById('setting-subtitle-mode').value = data.subtitle_mode || 'embed';
+  document.getElementById('setting-anime-audio').value = data.anime_default_audio || 'ita';
 }
 
 async function saveOutputSettings() {
   const btn = document.getElementById('save-output-btn');
   const outputContainer = document.getElementById('setting-output-container').value;
   const subtitleMode = document.getElementById('setting-subtitle-mode').value;
+  const animeAudio = document.getElementById('setting-anime-audio').value;
   btn.disabled = true;
   _feedback('output-feedback', 'Salvataggio...');
   try {
@@ -431,6 +433,7 @@ async function saveOutputSettings() {
     await api.put('/api/domain/settings', {
       output_container: outputContainer,
       subtitle_mode: subtitleMode,
+      anime_default_audio: animeAudio,
     });
     _feedback('output-feedback', 'Salvato.', 'success');
     showToast('Formato di uscita salvato', 'success');
