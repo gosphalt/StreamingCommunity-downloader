@@ -523,7 +523,8 @@ def retry(job_id: str):
 class BulkAction(BaseModel):
     action: Literal["pause", "resume", "cancel", "priority", "move"]
     # Omitted means every job the action applies to.
-    job_ids: Optional[list[str]] = Field(default=None, max_length=2000)
+    # Sized for a whole queue of series episodes (one batch can hold 1,000+); an omitted list means all jobs.
+    job_ids: Optional[list[str]] = Field(default=None, max_length=10000)
     priority: Optional[int] = Field(default=None, ge=-100, le=100)
     to: Optional[Literal["up", "down"]] = None
 
