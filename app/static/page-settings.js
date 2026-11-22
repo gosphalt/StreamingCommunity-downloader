@@ -848,7 +848,7 @@ async function loadLibraries() {
     if (inp) inp.value = excl;
   } catch(e) { console.error('loadLibraries:', e); }
 }
-const _LIB_TYPE_OPTIONS = [{value:'film',label:'Film'},{value:'tv',label:'Serie TV'},{value:'anime',label:'Anime'}];
+const _LIB_TYPE_OPTIONS = [{value:'film',label:'Film'},{value:'tv',label:'Serie TV'},{value:'anime',label:'Anime'},{value:'music',label:'Musica'},{value:'book',label:'Libri'}];
 function renderLibrariesList() {
   const c = document.getElementById('libraries-list');
   if (!c) return;

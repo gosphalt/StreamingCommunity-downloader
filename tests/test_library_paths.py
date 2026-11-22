@@ -271,3 +271,18 @@ def test_the_extension_stays_at_the_end():
     """FFmpeg picks the muxer from the extension, so the prefix must not
     disturb it."""
     assert ffmpeg_file_arg("/media/x/out.mkv").endswith(".mkv")
+
+
+def test_music_and_books_libraries_save(client, admin, posix_host):
+    # Listed for reference: Jellyfin has them, the panel never writes to them.
+    _, csrf = admin
+    response = client.put(
+        "/api/domain/libraries",
+        json={
+            "libraries": [{"type": "music", "path": "/media/musica"},
+                          {"type": "book", "path": "/media/libri"}],
+            "excluded_folders": [],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200

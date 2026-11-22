@@ -159,7 +159,8 @@ async def set_hosts(body: HostsUpdate):
 
 
 class LibraryItem(BaseModel):
-    type: Literal["film", "tv", "anime"]
+    # music and book are listed for reference only: the panel downloads no music or books.
+    type: Literal["film", "tv", "anime", "music", "book"]
     path: str
 
 
