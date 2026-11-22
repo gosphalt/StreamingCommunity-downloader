@@ -35,11 +35,12 @@ const _SOURCE_PLACEHOLDERS = {
   animeunity: 'Cerca anime...',
   youtube: 'Cerca su YouTube o incolla un link...',
   raiplay: 'Cerca su RaiPlay...',
+  books: 'Cerca libri di pubblico dominio...',
 };
 
 function _markSourceButtons(src) {
   for (const [id, key] of [['src-sc', 'streamingcommunity'], ['src-au', 'animeunity'],
-                           ['src-yt', 'youtube'], ['src-rp', 'raiplay']]) {
+                           ['src-yt', 'youtube'], ['src-rp', 'raiplay'], ['src-lb', 'books']]) {
     document.getElementById(id)?.classList.toggle('active', src === key);
   }
   const input = document.getElementById('search-input');
@@ -64,6 +65,7 @@ function setSource(src) {
   _markSourceButtons(src);
   _showYoutubeMode(src === 'youtube');
   _showRaiplayMode(src === 'raiplay');
+  _showBooksMode(src === 'books');
   document.getElementById('search-results').innerHTML = '';
   // The kinds are each source's own vocabulary, so a filter does not carry over.
   _searchResults = [];
@@ -248,7 +250,7 @@ async function toggleBrowse() {
 }
 
 function _loadBrowseOpts() {
-  if (_browseOpts || currentSource === 'raiplay') return;   // RaiPlay has no browse lists
+  if (_browseOpts || currentSource === 'raiplay' || currentSource === 'books') return;   // RaiPlay has no browse lists
   const src = currentSource;
   api.get('/api/search/browse/options', {source: src}).then(o => {
     if (src !== currentSource) return;   // the source changed while it loaded
@@ -373,6 +375,10 @@ async function doSearch(options) {
   }
   if (currentSource === 'raiplay') {
     if (q) doRaiplaySearch(q);
+    return;
+  }
+  if (currentSource === 'books') {
+    doBooksSearch(q);
     return;
   }
   const browsing = !q && !!_browse;
@@ -523,7 +529,7 @@ function _shelfSkeletons() {
 
 async function showStartPage() {
   const host = document.getElementById('home-shelves');
-  if (!host || currentSource === 'youtube' || currentSource === 'raiplay') return;
+  if (!host || currentSource === 'youtube' || currentSource === 'raiplay' || currentSource === 'books') return;
   if (currentSource !== 'animeunity') {
     await ensureDomain();
     if (!currentDomain) { _setStartPageVisible(false); return; }
@@ -838,6 +844,8 @@ registerActions({
   'rp:season':     d => rpSeason(d.path, d.name),
   'rp:download':   (d, el) => rpDownload(d, el),
   'rp:back':       () => rpBack(),
+  'books:search':  () => doBooksSearch(document.getElementById('search-input')?.value.trim() || ''),
+  'books:download': (d, el) => bkDownload(d, el),
   'yt:savePath':   () => saveYoutubePath(),
   'yt:lang':       (d, el) => saveYoutubeLang(el.value),
   'search:source': d => setSource(d.source),
@@ -877,10 +885,11 @@ registerPageHash('search', {
     if (input) input.value = params.q || '';
     // Not setSource(): that clears the grid and re-runs the search, which is
     // the opposite of restoring one. Only the parts that are state.
-    currentSource = ['animeunity', 'youtube', 'raiplay'].includes(params.src) ? params.src : 'streamingcommunity';
+    currentSource = ['animeunity', 'youtube', 'raiplay', 'books'].includes(params.src) ? params.src : 'streamingcommunity';
     _markSourceButtons(currentSource);
     _showYoutubeMode(currentSource === 'youtube');
     _showRaiplayMode(currentSource === 'raiplay');
+    _showBooksMode(currentSource === 'books');
     _kindFilter = params.type || '';
     _dubOnly = params.dub === '1';
     _browse = params.br ? {list: params.br, genre: params.g || '', country: params.c || '',

@@ -1116,6 +1116,24 @@ class JobManager:
             cancel_event=job.cancel_event,
         )
 
+    def submit_book(self, identifier: str, title: str, creator: str, year: str,
+                    output_dir: str, fmt: str = "epub", user_id: int = None) -> str:
+        from app.core.books import download_book
+
+        # Like RaiPlay: a single file, not schedulable, not a batch.
+        job = self._make_job(title, "book", phases=["video", "done"],
+                             user_id=user_id, media_label=title, year=year,
+                             external_id=identifier)
+        return self._submit_job(
+            job, download_book,
+            identifier, title, creator, year,
+            output_dir=output_dir,
+            temp_dir=_tmp_dir(job),
+            fmt=fmt,
+            progress_factory=self._make_progress_factory(job),
+            cancel_event=job.cancel_event,
+        )
+
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
                        schedule_id: str = None,
