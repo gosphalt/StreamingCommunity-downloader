@@ -91,6 +91,8 @@ class AnimeDownloadRequest(BaseModel):
     year: str | None = None
     audio_languages: list[str] = Field(default_factory=lambda: [anime_default_audio()], max_length=10)
     subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
+    # Which library the file goes to: AnimeUnity does not separate series from films.
+    library: Literal["anime", "film"] = "anime"
 
 
 class SeasonDownloadRequest(BaseModel):
@@ -131,6 +133,7 @@ class AnimeAllDownloadRequest(BaseModel):
     year: str | None = None
     audio_languages: list[str] = Field(default_factory=lambda: [anime_default_audio()], max_length=10)
     subtitle_languages: list[str] = Field(default=["ita", "eng"], max_length=10)
+    library: Literal["anime", "film"] = "anime"
     scheduled_at: datetime | None = None
     # Skip episodes whose file is already in the library (#30).
     only_missing: bool = False
@@ -332,7 +335,7 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
         def make(episode, label):
             def submit(batch_id):
                 common = dict(
-                    anime_type=body.anime_type, year=body.year,
+                    anime_type=body.anime_type, year=body.year, library=body.library,
                     audio_languages=body.audio_languages,
                     subtitle_languages=body.subtitle_languages,
                     user_id=user_id, batch_id=batch_id, batch_kind="anime_all",
@@ -435,7 +438,7 @@ def download_episode(body: EpisodeDownloadRequest, http_request: HttpRequest):
 def download_anime(body: AnimeDownloadRequest, http_request: HttpRequest):
     job_id = job_manager.submit_anime_episode(
         body.anime_id, body.episode.model_dump(), body.anime_name, body.anime_type, year=body.year,
-        audio_languages=body.audio_languages,
+        library=body.library, audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
         user_id=_acting_user_id(http_request),
     )
@@ -474,7 +477,7 @@ def schedule_episode(body: EpisodeScheduleRequest, http_request: HttpRequest):
 def schedule_anime(body: AnimeScheduleRequest, http_request: HttpRequest):
     job_id = job_manager.schedule_anime_episode(
         body.anime_id, body.episode.model_dump(), body.anime_name, body.scheduled_at,
-        anime_type=body.anime_type, year=body.year,
+        anime_type=body.anime_type, year=body.year, library=body.library,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
         user_id=_acting_user_id(http_request),

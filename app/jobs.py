@@ -662,7 +662,7 @@ class JobManager:
                 params["anime_id"], params["episode"],
                 params["anime_name"], params.get("anime_type", "tv"),
             ), dict(
-                output_dir=_get_library_path("anime"), temp_dir=td, progress_factory=pf,
+                output_dir=_get_library_path(params.get("library", "anime")), temp_dir=td, progress_factory=pf,
                 cancel_event=job.cancel_event, year=params.get("year"),
                 audio_languages=params.get("audio_languages", ["ita"]),
                 subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
@@ -1157,7 +1157,7 @@ class JobManager:
                              schedule_id: str = None,
                              audio_languages: list[str] = None,
                              subtitle_languages: list[str] = None,
-                             strict_audio: bool = False,
+                             strict_audio: bool = False, library: str = "anime",
                              user_id: int = None, batch_id: str = None,
                              batch_kind: str = None, batch_label: str = None) -> str:
         from app.core.animeunity import download_anime_episode
@@ -1172,7 +1172,7 @@ class JobManager:
         return self._submit_job(
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
-            output_dir=_get_library_path("anime"),
+            output_dir=_get_library_path(library),
             temp_dir=_tmp_dir(job),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
@@ -1227,7 +1227,7 @@ class JobManager:
 
     def schedule_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                                scheduled_at: datetime, anime_type: str = "tv",
-                               year: str = None,
+                               year: str = None, library: str = "anime",
                                audio_languages: list[str] = None,
                                subtitle_languages: list[str] = None,
                                user_id: int = None, batch_id: str = None,
@@ -1236,7 +1236,7 @@ class JobManager:
         title = f"{anime_name} E{ep_num}"
         params = {
             "anime_id": anime_id, "episode": episode, "anime_name": anime_name,
-            "anime_type": anime_type, "year": year,
+            "anime_type": anime_type, "year": year, "library": library,
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }

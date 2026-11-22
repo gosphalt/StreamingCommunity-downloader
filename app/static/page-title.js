@@ -190,6 +190,8 @@ async function _tpLoadAnime(token) {
     ]);
     if (token !== _tpToken) return;
     _tp.defaultAudio = pref.audio;
+    // Series or film is the user's call: AnimeUnity does not separate them in its libraries.
+    _tp.animeLibrary = isAnimeFilm(_tp.animeType) ? 'film' : 'anime';
     // Spread, not a projection: startAnimeDownload reads episode.number and
     // posts the whole record back. Narrowing it to {id, n} here sent the API
     // a stripped object and labelled every job "E undefined". `n` is added
@@ -199,6 +201,7 @@ async function _tpLoadAnime(token) {
       animeId: _tp.id, animeName: _tp.name, animeType: _tp.animeType || 'tv',
       animeYear: _tp.year, episodes: _tp.episodes,
       audioLangs: _tpPicked('audio'), subLangs: _tpPicked('subs'), scheduledAt: _tp.scheduledAt,
+      library: _tp.animeLibrary || 'anime',
     };
   } catch (e) {
     if (token !== _tpToken) return;
@@ -520,7 +523,12 @@ function _tpRenderEpisodes() {
                    ${_tp.onlyMissing ? 'checked' : ''}>
             <span class="form-check-label">Solo mancanti${ownedHint}</span>
           </label>` + (_tp.type === 'anime'
-        ? `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchAnime">
+        ? `<select class="form-select form-select-sm w-auto" data-change="tp:animeLibrary"
+                 title="Dove salvare: libreria delle serie o dei film">
+             <option value="anime" ${_tp.animeLibrary !== 'film' ? 'selected' : ''}>Serie TV</option>
+             <option value="film" ${_tp.animeLibrary === 'film' ? 'selected' : ''}>Film</option>
+           </select>
+           <button class="btn btn-sm btn-outline-primary" data-action="tp:batchAnime">
              <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
         : `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchSeason" data-season="${_tp.season}">
              <i class="ti ti-download me-1"></i>${verb} la stagione</button>`);
@@ -838,7 +846,7 @@ async function _animeAudio(held) {
 }
 
 async function startAnimeDownload(epIndex) {
-  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
+  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs, library } = _animeCtx;
   const episode = episodes[epIndex];
   const label = `${animeName} E${episode.number}`;
   const audio = await _animeAudio(audioLangs);
@@ -857,6 +865,7 @@ async function startAnimeDownload(epIndex) {
   const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
   const body = {
     anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear,
+    library: library || 'anime',
     audio_languages: audio,
     subtitle_languages: subLangs || ['ita', 'eng'],
   };
@@ -870,12 +879,12 @@ async function startAnimeDownload(epIndex) {
 
 async function downloadAllAnime() {
   const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
-          audioLangs, subLangs } = _animeCtx;
+          audioLangs, subLangs, library } = _animeCtx;
   const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
   if (!await scConfirm(`${label} tutti i ${episodes.length} episodi${_skipNote()}?`)) return;
   await _startBatch('/api/download/anime-all', {
     anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
-    year: animeYear,
+    year: animeYear, library: library || 'anime',
     audio_languages: await _animeAudio(audioLangs), subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
     only_missing: _onlyMissing(),
@@ -900,6 +909,7 @@ registerActions({
   'tp:season':        d => tpLoadSeason(Number(d.n)),
   'tp:schedule':      (d, el) => tpSetSchedule(el.value),
   'tp:onlyMissing':   (d, el) => { _tp.onlyMissing = el.checked; },
+  'tp:animeLibrary':  (d, el) => { _tp.animeLibrary = el.value; if (_animeCtx) _animeCtx.library = el.value; },
   'tp:requestSeason': () => tpRequestSeason(),
   'tp:batchSeason':   d => downloadWholeSeason(Number(d.season)),
   'tp:batchAnime':    () => downloadAllAnime(),
