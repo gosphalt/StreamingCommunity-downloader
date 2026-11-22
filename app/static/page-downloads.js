@@ -580,8 +580,12 @@ function renderAllJobCards() {
   // the same list, ordered by the newest thing each entry holds.
   const groups = new Map();
   const loose = [];
+  // Counted over every job, not the visible ones: a filter must not turn a season into a "single file".
+  const batchSize = new Map();
+  _jobs.forEach(j => { if (j.batch_id) batchSize.set(j.batch_id, (batchSize.get(j.batch_id) || 0) + 1); });
   visible.forEach(j => {
-    if (!j.batch_id) { loose.push(j); return; }
+    // A batch of one file (a film from AnimeUnity, say) has no series to group: it is a card.
+    if (!j.batch_id || batchSize.get(j.batch_id) === 1) { loose.push(j); return; }
     if (!groups.has(j.batch_id)) groups.set(j.batch_id, []);
     groups.get(j.batch_id).push(j);
   });
