@@ -42,66 +42,11 @@ request before any route runs.
 
 ### Layout
 
-**`app/core/`** — source interaction and the download engine
-- `page.py` — domain check, and the StreamingCommunity search. `_data_page()` /
-  `fetch_page_props()` read the Inertia payload out of the server-rendered page's
-  `data-page` attribute — no XHR headers, no session — and `normalize_title()` is the
-  one place a raw title becomes a result. `home.py` uses all three.
-  Pages of the source go through `get_localized()` / `site_url()`, never a literal
-  `/it`: some hosts serve no locale segment (#34), and the form each host answers
-  to is learned from a 404 and remembered per host.
-- `home.py` — the shelves each source publishes on its own front page, behind a TTL
-  cache keyed on `(source, host)`, so a rotation cannot reach the old domain's entry
-- `domain_recovery.py` — finds the source domain again when it rotates: scrapes a
-  third-party page, guards the candidate, verifies it, and *proposes* it
-- `metadata.py` — plot/genres/rating/artwork/trailer, all from the title page's own props,
-  behind an in-process TTL cache
-- `naming.py` — the file/folder naming templates and their validation
-- `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
-- `tv.py` — seasons, episodes, per-episode languages, episode download
-- `hosts.py` — validation and verification of the AnimeUnity host and the video host override
-- `animeunity.py` — AnimeUnity search (`/archivio/get-animes`, paged 30 at a time,
-  with the source's own `type` and `dubbed` filters), episodes, download
-- `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
-- `youtube.py` — yt-dlp search and single-video download (not HLS). The download folder is `data.json` `youtube_dir`, one for all of YouTube, set in the YouTube tab (`/api/youtube/path`). The client sends a video id, never a URL: the watch URL is built here, so host checks cannot be bypassed.
-- `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
-- `headers.py` — user-agent rotation, `sanitize_filename`
-- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, `with_retry`,
-  and stream resolution (`resolve_stream`, `fetch_key_from_playlist`,
-  `_FALLBACK_PROVIDERS`)
-
-**`app/auth/`** — Jellyfin SSO, permissions, users
-- `jellyfin.py` — HTTP client (MediaBrowser header, stable DeviceId, X-Forwarded-For with retry)
-- `session.py` — server-side sessions (opaque token, SHA-256 stored)
-- `permissions.py` — independent `IntFlag` permissions
-- `deps.py` — `AuthMiddleware`, public allowlist, `require(...)`
-- `router.py` / `users_router.py` — setup, login, user import and management
-
-**`app/requests/`** — the request queue
-- `models.py` — records, content key, allowed transitions
-- `resolver.py` — re-resolution at approval, track verification, library check
-- `service.py` — lifecycle and job wiring
-- `notify.py` — dispatch; `CHANNELS` is the list every delivery fans out to
-- `apprise_channel.py` — external channels (Discord, Telegram, ntfy, …) as Apprise URLs
-- `router.py` — endpoints
-
-**`app/watches/`** — followed series and anime
-- `models.py` — watch records, followers, the seen-episode ledger
-- `poller.py` — periodic enumeration, diff against what is seen, auto-download decision
-- `router.py` — follow, unfollow, status, manual check
-
-**`app/mcp/`** — MCP server for AI agents, at `/mcp` on the panel itself
-- `server.py` — the `/mcp` ASGI endpoint (switch, bearer token, Streamable HTTP transport) and
-  the session manager the lifespan runs
-- `auth.py` — the single token: stored hashed, owned by whoever generated it
-- `tools.py` — the tools, each a thin call into an existing route handler
-
-**`app/`** — `jobs.py` (thread pool, `DownloadSlots`, SSE broadcast), `downloads_notify.py` (notifications
-for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
-(post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
-folder holds which title; endpoints in `routers/library.py`, UI in `static/library.js`), `schedule.py`, `db.py`,
-`config.py`, `progress.py`, `writable.py` (the boot check that temp, config and libraries can be
-written), `routers/`, `templates/`, `static/`
+Points that a file list cannot show:
+- Source pages go through `get_localized()` / `site_url()`, never a literal `/it`: some hosts serve no locale segment (#34), and the form each host answers to is learned from a 404 and remembered per host.
+- `page.py`: `_data_page()` / `fetch_page_props()` read the Inertia payload from the `data-page` attribute (no XHR headers, no session); `normalize_title()` is the one place a raw title becomes a result.
+- `youtube.py`: the client sends a video id, never a URL; the watch URL is built on the server, so host checks cannot be bypassed.
+- `paths.py` feeds the request system's library check, so a change there changes both; the optional `templates=` argument asks for the legacy layout.
 
 ### Persistence
 
@@ -241,38 +186,6 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **The progress bar counts segments obtained, not attempts made.** It is also the input to the
   stall watchdog (`timer()`), so counting failures as progress does not just misreport — it stops a
   source failing every single request from ever tripping the timeout.
-- **A domain found automatically is proposed, never adopted.** The page it comes from is edited by
-  people we do not control, and the domain decides where every search, image fetch and download
-  referer goes. `domain_recovery.is_plausible()` is the guard, and its load-bearing rule is that a
-  candidate must be a **second-level domain**: checking only the first label would accept
-  `streamingcommunity.attacker.tld`, where the part that decides where the traffic lands is the
-  attacker's. The name pattern is a module constant with an env override and **must not become a
-  settings field** — a text box that relaxes an SSRF guard is a loaded gun. `verify()` is
-  deliberately stricter than `PUT /api/domain`, which accepts an empty version string: an admin
-  typing a host in is making a decision, a web page is not. `domain_auto_apply` opts out of all of
-  this and is off by default.
-- **Title metadata has one provider and needs no credential.** It comes from the title page's own
-  props — the payload already fetched to find `tmdb_id` — so it costs no request of its own. Two
-  other providers were tried and removed after being measured, and the measurements are the reason:
-  the site's `/api/titles/preview` endpoint answers 419 (Laravel CSRF) to every request the panel
-  can make and never once worked, while TMDB turned out not to be an upgrade at all — the site
-  copies its synopses from TMDB, so the text was usually identical, and the round trip *lost* a
-  trailer on one title, a logo on another and 1100 characters of plot on a third. Do not re-add a
-  provider without measuring it against the props on real titles first.
-- **`metadata.cached_tmdb_id()` never does I/O.** A stream fallback would read it at download time,
-  and a download that is about to succeed must not pay a round trip to discover a fallback it will
-  not use.
-- **When stream resolution has nothing to fall back to, the primary error must survive.**
-  `_FALLBACK_PROVIDERS` is empty: a second road through vixsrc was built and removed, because that
-  site is now a client-rendered app whose HTML carries no playlist, token or `.m3u8` at all — the
-  data would have to come from reverse-engineered internal calls that break silently on any of
-  their deploys. `resolve_stream()` is the seam a replacement plugs into, and the resolution
-  context (`tmdb_id`, media type, season, episode) is already threaded from every caller.
-  A user told "no alternative source" when the real failure was Cloudflare has been sent to debug
-  the wrong thing, so the original exception is re-raised unchanged. AnimeUnity is excluded from
-  all of it on purpose: no TMDB id, different embed host. `fetch_key_from_playlist()` exists so a
-  new provider does not have to solve the key again — it is read from the playlist with an
-  allowlisted host, never assumed.
 - **Download hooks are HTTP-only, and blind.** There is no shell hook and there must not be one:
   open mode grants `MANAGE_SETTINGS` to every anonymous visitor, so a command would be RCE for
   anyone who can reach the panel. A webhook pointing at a private address is the *point* (that is
@@ -319,35 +232,6 @@ anything under a mounted static directory is readable by unauthenticated visitor
   Windows lacks — accepting exactly one candidate, and forgets a folder missing for 30 days only
   while the library root was readable and not empty. A followed series' stored year is corrected
   from the title props by `poller.refresh_year()`, only in a cycle that found something new.
-- **The container is one setting read in one place, and nothing is ever re-encoded.**
-  `container.configured()` is the only source; `paths.*_path()` take `container=` the way they take
-  `templates=`, and everything downstream infers the container from the extension of the file it is
-  handed rather than from a second lookup — which is what makes the temp audio tracks (genuinely
-  `.mp4`) mux correctly while the destination is Matroska. Three consequences worth knowing.
-  `movflags` is mov/mp4-private: handed to the matroska muxer FFmpeg refuses the whole command, at
-  the end of the download, after every byte is fetched. The remux now reads and writes the *same*
-  extension, so it stages a dot-prefixed sibling in the library folder and `os.replace()`s it —
-  dot-prefixed because a Jellyfin scan running meanwhile would otherwise index the half-written
-  file as a second copy, and a sibling rather than something under `tmp/` because `os.replace`
-  cannot cross a filesystem. And `resolver.candidate_paths()` probes one extension per known
-  container, configured first: two axes, one stat each, which is what
-  `tests/test_naming_library_check.py` pins at exactly two. A finished download deletes the same
-  stem in the *other* container, because Jellyfin reads `Film.mkv` and `Film.mp4` in one folder as
-  two versions of one film — the exact sibling only, and only once the new file is complete. Video and audio are always stream-copied
-  — the source is H.264 + AAC, native to both — so the only conversion is WebVTT to `mov_text`, and
-  only when subtitles are embedded into MP4. A transcoding option does not belong here: it would
-  turn a four-minute download into an hours-long CPU job under a stall watchdog built for neither.
-- **An MCP tool that changes anything calls the route handler, never the layer beneath it.** The agent acts as the
-  token's owner, with their live permissions (`auth.token_owner()`), passed to the handler as
-  `request.state.user` exactly as `AuthMiddleware` would set it; the tool checks the permission
-  the route's dependency declares, since dependencies do not run on a direct call. The first
-  version reimplemented follow, season batches and requests beside the routers and lost, in
-  turn: the seed-or-roll-back (an unreadable source left a watch armed with no baseline, so the
-  next cycle queued the back catalogue), `downloads_notify.abandon()` (a season that failed
-  mid-submit never closed its batch), and the requester (it filed requests as the first Jellyfin
-  admin). The token itself fails closed — no stored hash means no access — travels only in the
-  `Authorization` header (a query string lands in proxy logs), and is not a second server:
-  `/mcp` is a route of the panel, in `PUBLIC_PATHS` only because it authenticates itself.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 
