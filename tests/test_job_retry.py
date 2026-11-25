@@ -220,3 +220,10 @@ def test_cancelling_during_the_wait_ends_it_at_once(monkeypatch):
         assert finished == ["cancelled"]
     finally:
         jm._executor.shutdown(wait=False)
+
+
+def test_an_episode_the_source_hides_is_not_retried():
+    from app.core.animeunity import NoPlayableVideoError
+    from app.jobs import _worth_retrying
+    assert _worth_retrying(NoPlayableVideoError("hidden")) is False
+    assert _worth_retrying(RuntimeError("503")) is True

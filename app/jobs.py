@@ -163,7 +163,8 @@ def _worth_retrying(exc: Exception) -> bool:
     away. Never all of OSError: ``requests.ConnectionError`` is one too.
     """
     from app.core._shared import MissingAudioTrackError
-    if isinstance(exc, MissingAudioTrackError):
+    from app.core.animeunity import NoPlayableVideoError
+    if isinstance(exc, (MissingAudioTrackError, NoPlayableVideoError)):
         return False
     if isinstance(exc, PermissionError) and getattr(exc, "winerror", None) is None:
         return False
