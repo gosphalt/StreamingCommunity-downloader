@@ -784,6 +784,7 @@ class JobManager:
             if not job or job.status not in ("done", "error", "cancelled"):
                 return False
             del self._jobs[job_id]
+        job_store.delete(job_id)
         if self._schedule_store is not None:
             self._schedule_store.remove_by_job_id(job_id)
         shutil.rmtree(_tmp_dir(job), ignore_errors=True)
@@ -836,6 +837,7 @@ class JobManager:
             if self._jobs.get(job_id) is not old:
                 return None
             del self._jobs[job_id]
+        job_store.delete(job_id)
         if self._schedule_store is not None:
             self._schedule_store.remove_by_job_id(job_id)
         self._broadcast({"type": "job_dismissed", "job_id": job_id})
@@ -877,6 +879,18 @@ class JobManager:
                     self._emit(job, {"type": "error", "message": "Annullato"})
                     return
                 job.retry_at = None
+                # The source may have rotated while we waited: aim the retry at the
+                # domain configured now. If it cannot be reached yet, the old
+                # arguments stay and the next failure is retried as before.
+                try:
+                    moved = self._on_current_domain(fn, args)
+                    if moved is not args:
+                        # Segments fetched from the old domain are not trusted: start over.
+                        shutil.rmtree(_tmp_dir(job), ignore_errors=True)
+                    args = moved
+                except Exception:
+                    logger.warning("Job %s: cannot move the retry to the current domain yet",
+                                   job.job_id, exc_info=True)
                 if "progress_factory" in kwargs:
                     # The factory carries byte totals from phase to phase; the
                     # failed attempt's must not count toward the new one.
@@ -895,9 +909,13 @@ class JobManager:
             job.run_seconds = round(time.monotonic() - job.run_started, 1)
             logger.info("Job %s %s after %.1f s", job.job_id, job.status, job.run_seconds)
         try:
-            job_store.delete(job.job_id)
+            if job.status == "error":
+                # Kept, so a restart still lists the failure and a person can run it again.
+                self._persist(job)
+            else:
+                job_store.delete(job.job_id)
         except Exception:
-            logger.exception("Could not clear the persisted record of job %s", job.job_id)
+            logger.exception("Could not update the persisted record of job %s", job.job_id)
         if job.status != "error":
             shutil.rmtree(_tmp_dir(job), ignore_errors=True)
             # Only a failed job can be retried, so the call (its arguments: a whole
@@ -966,6 +984,8 @@ class JobManager:
             "fn": _fn_path(fn),
             "args": list(args),
             "kwargs": kwargs,
+            "status": job.status,
+            "error": job.error,
             "job": {f: getattr(job, f) for f in _RESUME_FIELDS},
         }
         try:
@@ -984,6 +1004,9 @@ class JobManager:
         """
         resumed = 0
         for job_id, record in job_store.load_all():
+            if record.get("status") == "error":
+                self._restore_failed(job_id, record)
+                continue
             try:
                 fn = _resolve_fn(record["fn"])
                 meta = {k: v for k, v in record["job"].items() if k in _RESUME_FIELDS}
@@ -1012,6 +1035,23 @@ class JobManager:
                 continue
             resumed += 1
         return resumed
+
+    def _restore_failed(self, job_id: str, record: dict) -> None:
+        """A failed job a restart found: listed again, and run only when someone retries it."""
+        try:
+            fn = _resolve_fn(record["fn"])
+            meta = {k: v for k, v in record["job"].items() if k in _RESUME_FIELDS}
+            if "phases" in meta:
+                meta["phases"] = list(meta["phases"])
+            job = DownloadJob(job_id=job_id, status="error", error=record.get("error"),
+                              created_at=datetime.now(timezone.utc), **meta)
+        except Exception:
+            logger.exception("Failed job %s could not be listed again; dropping it", job_id)
+            job_store.delete(job_id)
+            return
+        self._remember_call(job, fn, tuple(record["args"]), record["kwargs"])
+        with self._lock:
+            self._jobs[job_id] = job
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         # Refused before the job exists: it would otherwise queue, download, and

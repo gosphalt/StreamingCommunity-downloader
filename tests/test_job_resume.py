@@ -129,8 +129,9 @@ def test_a_failed_job_keeps_its_segments_for_a_manual_retry(tmp_path, monkeypatc
     (tmp_path / job.job_id / "0.ts").write_bytes(b"x")
 
     assert wait(job.job_id).status == "error"
-    assert job_store.load_all() == []                  # nothing to resume after a failure
-    assert (tmp_path / job.job_id / "0.ts").exists()   # but the segments stay for the retry
+    ((kept_id, kept),) = job_store.load_all()          # the failure is kept, marked as failed
+    assert kept_id == job.job_id and kept["status"] == "error"
+    assert (tmp_path / job.job_id / "0.ts").exists()   # the segments stay for the retry
 
     new_id = jm.retry(job.job_id)
     assert wait(new_id).status == "done"
@@ -147,3 +148,30 @@ def test_dismissing_a_failed_job_frees_its_segments(tmp_path, monkeypatch):
     assert wait(job.job_id).status == "error"
     assert jm.dismiss(job.job_id)
     assert not (tmp_path / job.job_id).exists()
+
+
+def test_a_failed_job_survives_a_restart_and_runs_only_when_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, "TMP_DIR", tmp_path)
+    # The domain rebase is tested on its own; this one is about the record.
+    monkeypatch.setattr(JobManager, "_on_current_domain", staticmethod(lambda fn, args: args))
+    calls = []
+    monkeypatch.setattr("app.core.tv.download_episode", _fake_download(fails_first=True, calls=calls))
+
+    jm = JobManager()
+    wait = _terminal_events(jm)
+    job = _submit(jm, tmp_path, jobs._resolve_fn("app.core.tv:download_episode"))
+    assert wait(job.job_id).status == "error"
+
+    # A restart: the failure is listed again and nothing runs by itself.
+    restarted = JobManager()
+    assert restarted.resume_interrupted() == 0
+    listed = restarted.get(job.job_id)
+    assert listed.status == "error" and listed.error
+    assert len(calls) == 1
+
+    wait = _terminal_events(restarted)
+    new_id = restarted.retry(job.job_id)
+    assert wait(new_id).status == "done"
+    assert len(calls) == 2
+    assert restarted.get(job.job_id) is None
+    assert job_store.load_all() == []
