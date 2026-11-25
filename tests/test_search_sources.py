@@ -388,21 +388,22 @@ def test_without_the_language_asked_the_first_video_is_used():
     assert animeunity._pick_video(ep, ("ita",))["id"] == 10
 
 
-def test_a_visible_video_beats_a_hidden_one():
-    ep = {"number": "1", "videos": [_video(10, "ita", hidden=True), _video(20, "jpn")]}
-    assert animeunity._pick_video(ep)["id"] == 20
-    assert animeunity.get_episode_languages(ep) == {"audio": ["jpn"], "subtitles": []}
+def test_a_visible_video_beats_a_hidden_one_in_the_same_language():
+    ep = {"number": "1", "videos": [_video(10, "ita", hidden=True), _video(20, "ita")]}
+    assert animeunity._pick_video(ep, ("ita",))["id"] == 20
 
 
-def test_hidden_videos_are_the_fallback_when_nothing_is_visible():
-    ep = {"number": "5", "videos": [_video(10, "ita", hidden=True), _video(11, "jpn", hidden=True)]}
+def test_a_hidden_video_in_the_configured_language_beats_a_visible_one_in_another():
+    ep = {"number": "5", "videos": [_video(10, "ita", hidden=True), _video(20, "jpn")]}
     assert animeunity._pick_video(ep, ("ita",))["id"] == 10
     assert animeunity.get_episode_languages(ep) == {"audio": ["ita", "jpn"], "subtitles": []}
 
 
-def test_an_episode_with_no_video_is_an_error():
-    with pytest.raises(animeunity.NoPlayableVideoError, match="non ha video disponibili"):
-        animeunity._pick_video({"number": "3", "videos": []})
+def test_a_hidden_video_in_another_language_is_never_picked():
+    ep = {"number": "5", "videos": [_video(11, "jpn", hidden=True)]}
+    with pytest.raises(animeunity.NoPlayableVideoError, match="ita"):
+        animeunity._pick_video(ep, ("ita",))
+    assert animeunity._pick_video(ep, ("jpn",))["id"] == 11
 
 
 def test_the_languages_of_an_episode_are_its_videos_languages():

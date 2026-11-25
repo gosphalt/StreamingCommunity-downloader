@@ -194,38 +194,37 @@ def get_episodes(anime_id: str) -> list[dict]:
 
 
 class NoPlayableVideoError(RuntimeError):
-    """The source offers no video at all for an episode. A retry cannot change that."""
+    """No video on offer for the languages asked. A retry cannot change that."""
 
 
 def _visible_videos(episode: dict) -> list[dict]:
     return [v for v in (episode.get("videos") or []) if not v.get("is_hidden")]
 
 
-def _playable_videos(episode: dict) -> list[dict]:
-    """The visible videos; when the source hides every one, the hidden ones are the fallback.
-
-    The source still serves a hidden video, with the same playlists and resolutions, so
-    hiding one is not removing it. Visible videos always win when there are any.
-    """
-    return _visible_videos(episode) or list(episode.get("videos") or [])
-
-
 def _pick_video(episode: dict, languages=("ita",)) -> dict:
-    """The video to download: the first of ``languages`` on offer, else the first.
+    """The video to download, in the first of ``languages`` on offer.
+
+    A visible video in that language wins. Failing that, a hidden one in that
+    language: the source hides some videos without taking them down, and their
+    streams still answer. A hidden video is never taken for another language.
+    Only when no requested language is on offer at all does a visible video of
+    another language stand in, as it always has.
 
     AnimeUnity has one video per language, each a complete stream with its audio
     in-band, so a language is a video, not a track of one.
     """
-    videos = _playable_videos(episode)
-    if not videos:
-        raise NoPlayableVideoError(
-            f"L'episodio {episode.get('number')} non ha video disponibili su AnimeUnity: "
-            "il sito non ne serve nessuno")
+    visible = _visible_videos(episode)
+    hidden = [v for v in (episode.get("videos") or []) if v.get("is_hidden")]
     for lang in languages:
-        for video in videos:
-            if video.get("language") == lang:
-                return video
-    return videos[0]
+        for pool in (visible, hidden):
+            for video in pool:
+                if video.get("language") == lang:
+                    return video
+    if visible:
+        return visible[0]
+    raise NoPlayableVideoError(
+        f"L'episodio {episode.get('number')} non ha video in "
+        f"{' o '.join(languages)} su AnimeUnity")
 
 
 def _get_embed_content(anime_id: str, video_id: int) -> tuple[str, str]:
@@ -272,7 +271,7 @@ def _get_embed_content(anime_id: str, video_id: int) -> tuple[str, str]:
 
 def get_episode_languages(episode: dict) -> dict:
     """Audio languages of one anime episode: one per video. No subtitles are offered."""
-    audio = list(dict.fromkeys(v["language"] for v in _playable_videos(episode)
+    audio = list(dict.fromkeys(v["language"] for v in (episode.get("videos") or [])
                                if v.get("language")))
     return {"audio": audio, "subtitles": []}
 
