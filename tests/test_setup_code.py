@@ -45,3 +45,23 @@ def test_orphan_temp_dirs_are_purged_but_only_job_folders(tmp_path, monkeypatch)
     keep.mkdir()
     assert main.purge_orphan_temp_dirs() == 1
     assert not job.exists() and keep.exists()
+
+
+def test_a_damaged_temp_entry_does_not_stop_the_purge(tmp_path, monkeypatch):
+    import uuid
+    from pathlib import Path
+    from app import config, main
+    monkeypatch.setattr(config, "TMP_DIR", tmp_path)
+    damaged = tmp_path / str(uuid.uuid4())
+    job = tmp_path / str(uuid.uuid4())
+    (job / "video").mkdir(parents=True)
+    real_is_dir = Path.is_dir
+
+    def is_dir(self):
+        if self == damaged:
+            raise OSError(116, "Stale file handle")
+        return real_is_dir(self)
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+
+    assert main.purge_orphan_temp_dirs() == 1
+    assert not job.exists()

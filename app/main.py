@@ -131,7 +131,13 @@ def purge_orphan_temp_dirs(keep: frozenset = frozenset()) -> int:
             continue
         if entry.name in keep:
             continue
-        if entry.is_dir() and not entry.is_symlink():
+        try:
+            is_job_dir = entry.is_dir() and not entry.is_symlink()
+        except OSError:
+            # A damaged entry (a stale handle on NTFS) must not stop the panel starting.
+            logger.warning("Cannot inspect %s; leaving it in place", entry.name, exc_info=True)
+            continue
+        if is_job_dir:
             shutil.rmtree(entry, ignore_errors=True)
             removed += 1
     if removed:
