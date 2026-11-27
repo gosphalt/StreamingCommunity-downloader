@@ -816,6 +816,14 @@ function _bulkTargets() {
   return ids.length ? ids : [..._jobs.values()].filter(_isUnfinished).map(j => j.job_id);
 }
 
+// Moves the ticked download(s) that are waiting. Nothing ticked means nothing to move:
+// unlike the other bulk actions, "everything" is never the target of a move.
+async function bulkMove(to) {
+  const ids = [..._dlSelected].filter(id => _jobs.get(id)?.status === 'queued');
+  if (!ids.length) { showToast('Seleziona almeno un download in attesa', 'info'); return; }
+  await bulkAction('move', {to}, ids);
+}
+
 async function bulkAction(action, extra = {}, ids = _bulkTargets()) {
   if (!ids.length) return;
   if (action === 'cancel' && !await scConfirm(`Interrompere ${ids.length} download?`)) return;
@@ -936,6 +944,7 @@ registerActions({
   'jobs:select':      (d, el) => toggleSelect(d.job, el.checked),
   'jobs:selectAll':   (d, el) => selectAllVisible(el.checked),
   'jobs:bulk':        d => bulkAction(d.bulk),
+  'jobs:bulkMove':   d => bulkMove(d.to),
   'jobs:retry':       d => retryJob(d.job),
   'jobs:retryFailed': () => retryFailed(),
   'jobs:clearFailed': () => clearFailed(),

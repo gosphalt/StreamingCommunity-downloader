@@ -25,3 +25,17 @@ def test_a_list_above_the_new_limit_is_still_refused(client, signed_in):
     r = client.post("/api/download/bulk", headers={"X-CSRF-Token": signed_in},
                     json={"action": "pause", "job_ids": ids})
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("to", ["top", "up", "down", "bottom"])
+def test_a_bulk_move_accepts_every_direction(client, signed_in, to):
+    r = client.post("/api/download/bulk", headers={"X-CSRF-Token": signed_in},
+                    json={"action": "move", "job_ids": ["job-1", "job-2"], "to": to})
+    assert r.status_code == 200
+    assert r.json() == {"moved": False}
+
+
+def test_a_bulk_move_with_an_unknown_direction_is_refused(client, signed_in):
+    r = client.post("/api/download/bulk", headers={"X-CSRF-Token": signed_in},
+                    json={"action": "move", "job_ids": ["job-1"], "to": "sideways"})
+    assert r.status_code == 422

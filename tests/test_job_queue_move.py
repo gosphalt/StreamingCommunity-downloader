@@ -126,3 +126,33 @@ def test_a_block_takes_the_priority_of_the_neighbour_it_lands_beside():
     slots.move_group([b, c], "up")
     assert [j.priority for j in (b, c)] == [10, 10]
     assert _names(slots) == ["b", "c", "a"]
+
+
+def test_a_block_goes_to_the_top_keeping_its_order():
+    a, b, c, d = _job("a", 1), _job("b", 2), _job("c", 3), _job("d", 4)
+    slots = _line(a, b, c, d)
+    slots.move_group([c, d], "top")
+    assert _names(slots) == ["c", "d", "a", "b"]
+
+
+def test_a_block_goes_to_the_bottom_keeping_its_order():
+    a, b, c, d = _job("a", 1), _job("b", 2), _job("c", 3), _job("d", 4)
+    slots = _line(a, b, c, d)
+    slots.move_group([a, b], "bottom")
+    assert _names(slots) == ["c", "d", "a", "b"]
+
+
+def test_a_block_already_at_the_top_or_bottom_does_not_move():
+    a, b, c = _job("a", 1), _job("b", 2), _job("c", 3)
+    slots = _line(a, b, c)
+    assert slots.move_group([c, b], "bottom") == []
+    assert slots.move_group([a, b], "top") == []
+    assert _names(slots) == ["a", "b", "c"]
+
+
+def test_a_block_to_the_top_takes_the_priority_of_the_first_job():
+    a, b, c = _job("a", 1, priority=5), _job("b", 2), _job("c", 3, priority=-5)
+    slots = _line(a, b, c)
+    slots.move_group([c], "top")
+    assert c.priority == 5
+    assert _names(slots) == ["c", "a", "b"]

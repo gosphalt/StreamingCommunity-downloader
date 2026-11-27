@@ -526,7 +526,7 @@ class BulkAction(BaseModel):
     # Sized for a whole queue of series episodes (one batch can hold 1,000+); an omitted list means all jobs.
     job_ids: Optional[list[str]] = Field(default=None, max_length=10000)
     priority: Optional[int] = Field(default=None, ge=-100, le=100)
-    to: Optional[Literal["up", "down"]] = None
+    to: Optional[Literal["top", "up", "down", "bottom"]] = None
 
 
 @router.post("/bulk", status_code=200, dependencies=CAN_CONTROL_JOBS)

@@ -297,10 +297,12 @@ class DownloadSlots:
             return changed
 
     def move_group(self, group: list, where: str) -> list:
-        """Move a block of waiting jobs one place up or down, keeping its order.
+        """Move a block of waiting jobs up or down one place, or to the top or bottom.
 
-        The neighbour directly above (or below) the block jumps to the other side
-        of it; the block takes that neighbour's priority, as a single move does.
+        Up or down, the neighbour directly above (or below) the block jumps to the
+        other side of it. To the top or bottom, the block lands beside the line's
+        first or last job. Either way the block keeps its order and takes the
+        priority of the neighbour it lands beside, as a single move does.
         Returns the jobs whose ticket or priority changed.
         """
         with self._cond:
@@ -309,21 +311,28 @@ class DownloadSlots:
             idx = [i for i, j in enumerate(line) if id(j) in ids]
             if not idx:
                 return []
-            if where == "up":
+            if where == "top":
+                nb = line[0]
+                new_order = [j for j in line if id(j) in ids] + [j for j in line if id(j) not in ids]
+            elif where == "bottom":
+                nb = line[-1]
+                new_order = [j for j in line if id(j) not in ids] + [j for j in line if id(j) in ids]
+            elif where == "up":
                 if idx[0] == 0:
                     return []
                 nb = line[idx[0] - 1]
                 rest = [j for j in line if j is not nb]
                 last = max(i for i, j in enumerate(rest) if id(j) in ids)
-                pos = last + 1
+                new_order = rest[:last + 1] + [nb] + rest[last + 1:]
             else:
                 if idx[-1] == len(line) - 1:
                     return []
                 nb = line[idx[-1] + 1]
                 rest = [j for j in line if j is not nb]
                 first = min(i for i, j in enumerate(rest) if id(j) in ids)
-                pos = first
-            new_order = rest[:pos] + [nb] + rest[pos:]
+                new_order = rest[:first] + [nb] + rest[first:]
+            if all(a is b for a, b in zip(new_order, line)):
+                return []
             # the block lands beside nb, so it takes nb's priority
             changed = []
             for j in line:
