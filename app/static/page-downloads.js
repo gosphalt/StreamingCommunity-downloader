@@ -519,7 +519,9 @@ function _buildJobGroup(batchId, label, jobs) {
   const b = escapeHtml(batchId);
   const btn = (action, icon, title) =>
     `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:group${action}" data-batch="${b}" title="${title}"><i class="ti ti-${icon}"></i></button>`;
-  const move = to => `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:groupMove" data-batch="${b}" data-to="${to}" title="${to === 'up' ? 'Sposta il gruppo su' : 'Sposta il gruppo giù'}"><i class="ti ti-arrow-${to}"></i></button>`;
+  const MOVE_TITLES = {top: 'Porta il gruppo in cima', up: 'Sposta il gruppo su', down: 'Sposta il gruppo giù', bottom: 'Porta il gruppo in fondo'};
+  const MOVE_ICONS = {top: 'chevrons-up', up: 'arrow-up', down: 'arrow-down', bottom: 'chevrons-down'};
+  const move = to => `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:groupMove" data-batch="${b}" data-to="${to}" title="${MOVE_TITLES[to]}"><i class="ti ti-${MOVE_ICONS[to]}"></i></button>`;
   // Ticks every unfinished download of the group for a bulk action, as the card checkboxes do.
   const open = all.filter(_isUnfinished);
   const allPicked = open.length > 0 && open.every(j => _dlSelected.has(j.job_id));
@@ -530,7 +532,7 @@ function _buildJobGroup(batchId, label, jobs) {
   const toolbar = `<div class="d-flex flex-wrap gap-1 align-items-center px-2 pb-2">
     ${pick}${btn('Pause', 'player-pause', 'Metti in pausa il gruppo')}${btn('Resume', 'player-play', 'Riprendi il gruppo')}
     <select class="form-select form-select-sm w-auto" data-change="jobs:groupPriority" data-batch="${b}" title="Priorità del gruppo">${_priorityOptions(0)}</select>
-    ${move('up')}${move('down')}${btn('Cancel', 'player-stop', 'Interrompi il gruppo')}</div>`;
+    ${move('top')}${move('up')}${move('down')}${move('bottom')}${btn('Cancel', 'player-stop', 'Interrompi il gruppo')}</div>`;
   return `<div class="job-group${collapsed ? ' is-collapsed' : ''}">
     <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${b}"
             aria-expanded="${collapsed ? 'false' : 'true'}">
