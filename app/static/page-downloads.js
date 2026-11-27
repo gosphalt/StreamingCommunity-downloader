@@ -520,8 +520,15 @@ function _buildJobGroup(batchId, label, jobs) {
   const btn = (action, icon, title) =>
     `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:group${action}" data-batch="${b}" title="${title}"><i class="ti ti-${icon}"></i></button>`;
   const move = to => `<button class="btn btn-sm btn-outline-secondary" data-action="jobs:groupMove" data-batch="${b}" data-to="${to}" title="${to === 'up' ? 'Sposta il gruppo su' : 'Sposta il gruppo giù'}"><i class="ti ti-arrow-${to}"></i></button>`;
+  // Ticks every unfinished download of the group for a bulk action, as the card checkboxes do.
+  const open = all.filter(_isUnfinished);
+  const allPicked = open.length > 0 && open.every(j => _dlSelected.has(j.job_id));
+  const pick = can('DOWNLOAD') && open.length
+    ? `<label class="d-flex align-items-center gap-1 small m-0" title="Seleziona tutto il gruppo">` +
+      `<input type="checkbox" class="form-check-input m-0" data-change="jobs:selectGroup" data-batch="${b}"${allPicked ? ' checked' : ''}>Seleziona</label>`
+    : '';
   const toolbar = `<div class="d-flex flex-wrap gap-1 align-items-center px-2 pb-2">
-    ${btn('Pause', 'player-pause', 'Metti in pausa il gruppo')}${btn('Resume', 'player-play', 'Riprendi il gruppo')}
+    ${pick}${btn('Pause', 'player-pause', 'Metti in pausa il gruppo')}${btn('Resume', 'player-play', 'Riprendi il gruppo')}
     <select class="form-select form-select-sm w-auto" data-change="jobs:groupPriority" data-batch="${b}" title="Priorità del gruppo">${_priorityOptions(0)}</select>
     ${move('up')}${move('down')}${btn('Cancel', 'player-stop', 'Interrompi il gruppo')}</div>`;
   return `<div class="job-group${collapsed ? ' is-collapsed' : ''}">
@@ -834,6 +841,12 @@ async function bulkAction(action, extra = {}, ids = _bulkTargets()) {
   renderAllJobCards();
 }
 
+// Ticks or unticks every unfinished download of one group.
+function selectGroup(batchId, on) {
+  _groupIds(batchId).forEach(id => { on ? _dlSelected.add(id) : _dlSelected.delete(id); });
+  renderAllJobCards();
+}
+
 function toggleSelect(jobId, on) {
   on ? _dlSelected.add(jobId) : _dlSelected.delete(jobId);
   renderDlStats();
@@ -935,6 +948,7 @@ registerActions({
   'jobs:groupResume':   d => groupAction(d.batch, 'resume'),
   'jobs:groupCancel':   d => groupAction(d.batch, 'cancel'),
   'jobs:groupMove':     d => groupAction(d.batch, 'move', {to: d.to}),
+  'jobs:selectGroup':   (d, el) => selectGroup(d.batch, el.checked),
   'jobs:groupPriority': (d, el) => groupAction(d.batch, 'priority', {priority: Number(el.value)}),
   'jobs:cancel':      d => cancelJob(d.job),
   'jobs:pause':       d => bulkAction('pause', {}, [d.job]),
